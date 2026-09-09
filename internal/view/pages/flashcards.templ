@@ -14,6 +14,8 @@ type FlashcardsPageProps struct {
 	// GuestBanner marks an anonymous identity: offer the upgrade (#68).
 	GuestBanner bool
 	Cards       []partials.FlashcardProps
+	// Isolation is the RLS proof panel (ADR-034); rendered for identified visitors.
+	Isolation partials.IsolationProps
 }
 
 templ FlashcardsPage(props FlashcardsPageProps) {
@@ -35,6 +37,9 @@ templ FlashcardsPage(props FlashcardsPageProps) {
 					@partials.FlashcardList(partials.FlashcardListProps{Cards: props.Cards})
 				}
 			</div>
+			if !props.Teaser {
+				@partials.IsolationPanel(props.Isolation)
+			}
 		</div>
 	}
 }
