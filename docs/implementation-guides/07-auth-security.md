@@ -78,15 +78,16 @@ func CSRFProtection(next http.Handler) http.Handler {
 Implement rate limiting for sensitive endpoints, especially authentication. The starter's rate limiter is an in-memory per-IP token bucket built on `golang.org/x/time/rate` (ADR-014 §4) — no Redis and no third-party limiter; the stack has no Redis (caching is in-memory plus the Cloudflare edge per ADR-016):
 
 ```go
-// internal/middleware/ratelimit.go — RateLimiter(rps, burst) keeps a
-// token bucket per client IP and evicts stale entries in the background.
+// internal/middleware/ratelimit.go — RateLimiter(ctx, rps, burst) keeps a
+// token bucket per client IP and evicts stale entries in the background
+// until ctx is cancelled (the server owns that context; Server.Close ends it).
 import "golang.org/x/time/rate"
 
-// A global RateLimiter(50, 10) is already applied in the server
+// A global RateLimiter(ctx, 50, 10) is already applied in the server
 // middleware stack; add stricter tiers on route groups:
 r.Route("/auth", func(authRouter chi.Router) {
     authRouter.Group(func(strict chi.Router) {
-        strict.Use(mw.RateLimiter(5.0/60.0, 5)) // 5 attempts/min, burst 5
+        strict.Use(mw.RateLimiter(ctx, 5.0/60.0, 5)) // 5 attempts/min, burst 5
         // login, signup, password reset...
     })
 })
