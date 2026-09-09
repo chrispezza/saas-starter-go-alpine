@@ -4,7 +4,7 @@ Technology facts. This file updates when dependencies change or commands move; r
 
 ## Versions
 
-- **Language:** Go 1.25 (`go.mod`)
+- **Language:** Go 1.26 (`go.mod`)
 - **Router:** Chi v5 (stdlib-aligned, lightweight)
 - **Templating:** templ (type-safe, compiles to Go) — replaces `html/template` (ADR-017)
 - **Frontend:** HTMX + Alpine.js (minimal JS), Tailwind CSS v4 (`@tailwindcss/cli`)
