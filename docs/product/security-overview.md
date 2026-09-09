@@ -85,13 +85,15 @@ func CSRFProtection(next http.Handler) http.Handler {
 ### Configuration
 ```go
 // Per-IP token bucket built on golang.org/x/time/rate
-// (internal/middleware/ratelimit.go), tiered via route groups (ADR-014)
+// (internal/middleware/ratelimit.go), tiered via route groups (ADR-014).
+// ctx is the server's lifecycle context: idle-bucket eviction stops when
+// Server.Close cancels it (#117).
 
 // Global limit: 50 req/sec, burst 10
-r.Use(mw.RateLimiter(50, 10))
+r.Use(mw.RateLimiter(ctx, 50, 10))
 
 // Strict tier on credential endpoints: 5 attempts per minute, burst 5
-strict.Use(mw.RateLimiter(5.0/60.0, 5))
+strict.Use(mw.RateLimiter(ctx, 5.0/60.0, 5))
 ```
 
 ## Database Security

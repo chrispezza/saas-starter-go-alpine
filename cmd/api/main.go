@@ -14,7 +14,6 @@ import (
 	"github.com/joho/godotenv"
 
 	"github.com/clownware/go-performance-starter/internal/config"
-	_ "github.com/clownware/go-performance-starter/internal/database" // Keep for sqlc generated types, alias not needed directly here
 	"github.com/clownware/go-performance-starter/internal/jobs"
 	"github.com/clownware/go-performance-starter/internal/middleware"
 	"github.com/clownware/go-performance-starter/internal/repository/postgres"
@@ -93,17 +92,9 @@ func main() {
 	defer db.Close()
 	slog.Info("Database connection established successfully")
 
-	// Note: The following line is commented out because sqlc code generation hasn't been run yet
-	// When sqlc is run, it will generate the New() function to create queries
-	// queries := database.New(db)
-	// Repositories will be created here in later phases
-	_ = "queries will be used in Phase 3-4"
-
-	// At this point, we would set up repositories and handlers, but that's for Phase 3-4
-	// We'll just create a simple endpoint to verify our setup
-
-	// Initialize the router with middleware and routes
-	srv, err := server.New(cfg, db) // Pass db connection to server
+	// Wire the router: middleware stack, repositories, and routes live in
+	// internal/server; main only injects the pool.
+	srv, err := server.New(cfg, db)
 	if err != nil {
 		slog.Error("Failed to create server", "error", err)
 		os.Exit(1)
