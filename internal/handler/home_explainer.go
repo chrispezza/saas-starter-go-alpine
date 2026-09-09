@@ -43,7 +43,7 @@ func ExplainerNodes() []pages.ExplainerNode {
 				Snippet: `s.router.Use(mw.SecurityHeaders(isProd))
 s.router.Use(mw.RequestID)
 s.router.Use(mw.RealIP(s.cfg.TrustedProxyCIDRs, s.cfg.ClientIPHeader)) // before the limiter
-s.router.Use(mw.RateLimiter(50, 10))
+s.router.Use(mw.RateLimiter(ctx, 50, 10)) // eviction stops with the server (#117)
 s.router.Use(mw.Compress(5))
 s.router.Use(mw.Metrics)
 s.router.Use(mw.RequestLogger)
@@ -55,7 +55,7 @@ r.Group(func(learn chi.Router) {
     learn.Use(mw.GuestSession(s.authClient, isProd)) // anonymous identity on first touch
     learn.Use(mw.OptionalAuth(s.authClient, isProd))
     learn.Use(mw.OptionalUserLoader(userRepo))
-    learn.Use(mw.RateLimiter(30.0/60.0, 20))         // stricter tier, anonymous-writable
+    learn.Use(mw.RateLimiter(ctx, 30.0/60.0, 20))    // stricter tier, anonymous-writable
     handler.QuizRoutes(learn, quizRepo)
 })`,
 			},

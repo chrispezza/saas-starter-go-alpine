@@ -32,6 +32,7 @@ func newServer(t *testing.T, cfg *config.Config, db *pgxpool.Pool) *Server {
 	if err != nil {
 		t.Fatalf("New() error: %v", err)
 	}
+	t.Cleanup(srv.Close)
 	return srv
 }
 
@@ -344,5 +345,23 @@ func TestServer_HomeExplainer(t *testing.T) {
 		if !strings.Contains(body, want) {
 			t.Errorf("budget grid missing %q (rendered from internal/performance)", want)
 		}
+	}
+}
+
+// TestServer_CloseIsIdempotentAndKeepsServing pins the #117 lifecycle
+// contract: Close releases router-owned goroutines, may be called more than
+// once, and never breaks request handling — the rate limiter keeps limiting
+// without its eviction sweep.
+func TestServer_CloseIsIdempotentAndKeepsServing(t *testing.T) {
+	srv := newTestServer(t, "development")
+
+	srv.Close()
+	srv.Close()
+
+	req := httptest.NewRequest(http.MethodGet, "/healthz", nil)
+	rec := httptest.NewRecorder()
+	srv.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("GET /healthz after Close() status = %d, want %d", rec.Code, http.StatusOK)
 	}
 }

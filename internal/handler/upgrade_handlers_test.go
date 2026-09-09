@@ -285,7 +285,7 @@ func TestUpgradeSubmit(t *testing.T) {
 // is about which requests the limiter lets through at all.
 func TestUpgradeRoutes_RateLimitTier(t *testing.T) {
 	router := chi.NewRouter()
-	UpgradeRoutes(router, &fakeUpgrader{}, false)
+	UpgradeRoutes(t.Context(), router, &fakeUpgrader{}, false)
 
 	post := func() int {
 		req := formRequest("/learn/upgrade", "email=a@b.co&password=12345678")

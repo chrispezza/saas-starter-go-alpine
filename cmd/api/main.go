@@ -156,6 +156,7 @@ func main() {
 		slog.Error("Server shutdown failed", "error", err)
 		os.Exit(1)
 	}
+	srv.Close() // stop router-owned goroutines once no requests remain (#117)
 
 	slog.Info("Server stopped gracefully")
 }
