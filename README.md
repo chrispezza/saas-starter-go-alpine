@@ -45,7 +45,7 @@ Forking this for your own product? The governance apparatus is modular ([ADR-019
 
 ## Prerequisites
 
-- Go 1.25+
+- Go 1.26+
 - Docker & Docker Compose (for local development database)
 - [Task](https://taskfile.dev) (task runner)
 - Node.js 20+ (for Tailwind CSS build)
