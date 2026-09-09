@@ -1,6 +1,7 @@
 package server
 
 import (
+	"context"
 	"fmt"
 	"log/slog"
 	"net/http"
@@ -28,7 +29,9 @@ type Server struct {
 	cfg        *config.Config
 	db         *pgxpool.Pool
 	authClient *auth.AuthClient
-	// Add other dependencies like database connections here as needed
+	// stop cancels the lifecycle context handed to background goroutines the
+	// router owns (rate-limiter eviction, #117); Close calls it.
+	stop context.CancelFunc
 }
 
 // New creates a new Server instance.
@@ -52,11 +55,13 @@ func New(cfg *config.Config, db *pgxpool.Pool) (*Server, error) {
 
 	r := chi.NewRouter()
 
+	ctx, stop := context.WithCancel(context.Background())
 	s := &Server{
 		router:     r,
 		cfg:        cfg,
 		db:         db,
 		authClient: authClient,
+		stop:       stop,
 	}
 
 	// Initialize health check with DB pool for connectivity checks. The pool
@@ -68,10 +73,17 @@ func New(cfg *config.Config, db *pgxpool.Pool) (*Server, error) {
 	}
 	handler.InitHealth(pinger)
 
-	s.setupMiddleware()
-	s.setupRoutes()
+	s.setupMiddleware(ctx)
+	s.setupRoutes(ctx)
 
 	return s, nil
+}
+
+// Close stops the background goroutines the server started (#117). It does
+// not affect in-flight requests — the HTTP server's Shutdown handles those —
+// and is safe to call more than once.
+func (s *Server) Close() {
+	s.stop()
 }
 
 // fileServer conveniently sets up a http.FileServer handler to serve static files
@@ -154,7 +166,7 @@ func isFileType(filePath string, extensions ...string) bool {
 	return false
 }
 
-func (s *Server) setupMiddleware() {
+func (s *Server) setupMiddleware(ctx context.Context) {
 	isProd := s.cfg.IsProduction()
 
 	// Basic middleware (order matters!)
@@ -162,7 +174,7 @@ func (s *Server) setupMiddleware() {
 	s.router.Use(mw.RequestID)                                             // Generate request ID
 	s.router.Use(mw.RealIP(s.cfg.TrustedProxyCIDRs, s.cfg.ClientIPHeader)) // Resolve client IP via trusted proxies (ADR-027; before rate limiter)
 	s.router.Use(mw.MaxBodyBytes(s.cfg.MaxRequestBodyBytes))               // Cap request body size (2026-07-06 audit)
-	s.router.Use(mw.RateLimiter(50, 10))                                   // Global rate limit (ADR-014)
+	s.router.Use(mw.RateLimiter(ctx, 50, 10))                              // Global rate limit (ADR-014)
 	s.router.Use(mw.Compress(5))                                           // gzip/deflate responses
 	s.router.Use(mw.Metrics)                                               // Track metrics (uses RequestID)
 	s.router.Use(mw.RequestLogger)                                         // Log requests with context
@@ -179,7 +191,7 @@ func (s *Server) setupMiddleware() {
 	fileServer(s.router, "/static", http.Dir("./web/static"))
 }
 
-func (s *Server) setupRoutes() {
+func (s *Server) setupRoutes(ctx context.Context) {
 	r := s.router // Use the router from the Server struct
 
 	// Static & Informational Pages
@@ -209,7 +221,7 @@ func (s *Server) setupRoutes() {
 			protectedRouter.Post("/profile", handler.ProfileUpdate)
 			// Change password (#97): the session token is the credential, so
 			// it sits on the strict credential tier like /auth/reset.
-			protectedRouter.With(mw.RateLimiter(5.0/60.0, 5)).
+			protectedRouter.With(mw.RateLimiter(ctx, 5.0/60.0, 5)).
 				Post("/profile/password", handler.ProfilePasswordUpdate(s.authClient))
 			handler.FirstRunHandlers(protectedRouter)
 		})
@@ -234,7 +246,7 @@ func (s *Server) setupRoutes() {
 			learn.Use(mw.OptionalUserLoader(postgres.NewUserRepo(s.db, database.New(s.db))))
 			// Anonymous-writable surface: stricter tier on top of the global
 			// limiter (ADR-024 accompanying constraints).
-			learn.Use(mw.RateLimiter(30.0/60.0, 20))
+			learn.Use(mw.RateLimiter(ctx, 30.0/60.0, 20))
 			quizRepo := postgres.NewQuizRepo(s.db, database.New(s.db))
 			cardRepo := postgres.NewFlashcardRepo(s.db, database.New(s.db))
 			handler.QuizRoutes(learn, quizRepo)
@@ -244,7 +256,7 @@ func (s *Server) setupRoutes() {
 			handler.DashboardRoutes(learn, quizRepo, cardRepo)
 			// Guest → registered upgrade (#68): same identity chain as the
 			// other /learn surfaces; the POST adds the strict credential tier.
-			handler.UpgradeRoutes(learn, s.authClient, s.cfg.IsProduction())
+			handler.UpgradeRoutes(ctx, learn, s.authClient, s.cfg.IsProduction())
 		})
 	} else {
 		// No identity chain to mount under: keep the dashboard shell routed
@@ -263,7 +275,7 @@ func (s *Server) setupRoutes() {
 			// Credential endpoints get the strict tier: 5 attempts/min
 			// per IP (ADR-014 §4), on top of the global limiter.
 			authRouter.Group(func(strict chi.Router) {
-				strict.Use(mw.RateLimiter(5.0/60.0, 5))
+				strict.Use(mw.RateLimiter(ctx, 5.0/60.0, 5))
 				strict.Post("/login", handler.AuthLoginPost(s.authClient, s.cfg.IsProduction())) // Handle login
 				strict.Post("/signup", handler.AuthSignupPost(s.authClient))                     // Handle signup
 				strict.Post("/recover", handler.AuthRecoverPost(s.authClient))                   // Send reset email

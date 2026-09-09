@@ -30,11 +30,12 @@ type anonUpgrader interface {
 
 // UpgradeRoutes registers the guest → registered upgrade flow (ADR-024, #68)
 // on the /learn group. The credential-setting POST gets the strict rate tier
-// like the other credential endpoints (ADR-014 §4).
-func UpgradeRoutes(r chi.Router, upgrader anonUpgrader, secureCookie bool) {
+// like the other credential endpoints (ADR-014 §4). ctx bounds the tier's
+// background eviction (#117); the server passes its lifecycle context.
+func UpgradeRoutes(ctx context.Context, r chi.Router, upgrader anonUpgrader, secureCookie bool) {
 	r.Get("/learn/upgrade", UpgradePage)
 	r.Group(func(strict chi.Router) {
-		strict.Use(mw.RateLimiter(5.0/60.0, 5))
+		strict.Use(mw.RateLimiter(ctx, 5.0/60.0, 5))
 		strict.Post("/learn/upgrade", UpgradeSubmit(upgrader, secureCookie))
 	})
 }
