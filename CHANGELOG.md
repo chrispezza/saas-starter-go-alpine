@@ -8,6 +8,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- Observed-vs-budget grid (ADR-034): the landing page's budgets section now
+  shows, per budget, what this process observed since boot — p50/p95/p99
+  over the last 4096 requests, memory and its high-water mark, startup
+  (process start → listening socket, measured in `main`), the executable
+  size, and the shipped assets gzipped — with pass/fail and the ADR-000
+  class (Enforced/Monitored/Aspirational). Unmeasured values say so
+  instead of showing a passing zero. Every response also carries
+  `Server-Timing: app;dur=<ms>`. The asset file lists now live in
+  `internal/performance` so the CI gate and the runtime measure the same
+  files
 - Share and crawl surface: every page carries a real meta description,
   Open Graph and Twitter card tags, and — when `PUBLIC_BASE_URL` is set —
   a canonical link plus absolute `og:url`/`og:image` (a 1200×630 share
