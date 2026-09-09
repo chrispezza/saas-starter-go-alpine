@@ -8,6 +8,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- Three quiz questions on the ADR-034 proof surfaces (observed-vs-budget
+  grid, the isolation check, Retry-After on 429) via migration 000008,
+  re-included by the demo seed, so the tour's hand-offs still ask what
+  the page just showed
 - Rate-limit pattern (ADR-034) on `/patterns`: a button behind the
   production `RateLimiter` on a deliberately tight tier (3 requests, then
   one per 2s, per client IP). Refusals are real 429s rendered as fragments

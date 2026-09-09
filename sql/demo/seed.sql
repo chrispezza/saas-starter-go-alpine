@@ -7,3 +7,4 @@
 -- belongs in a migration instead.
 
 \ir ../../migrations/000007_seed_quiz_questions.up.sql
+\ir ../../migrations/000008_seed_quiz_proof_questions.up.sql
