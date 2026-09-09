@@ -141,6 +141,20 @@ func quizFixtures() []database.QuizQuestion {
 	}
 }
 
+// quizTopicFixtures extends quizFixtures with a second "database" question so
+// the per-topic run (#118) has an order to walk and an unanswered one to prefer.
+func quizTopicFixtures() []database.QuizQuestion {
+	return append(quizFixtures(), database.QuizQuestion{
+		ID:           uuid.New(),
+		Slug:         "rls-policies",
+		Topic:        "database",
+		Prompt:       "Where do the RLS policies live?",
+		Choices:      []byte(`["In migrations","In handlers","In templ"]`),
+		CorrectIndex: 0,
+		Explanation:  "Policies are versioned SQL in migrations/.",
+	})
+}
+
 func newQuizRouter(repo repository.QuizRepository) http.Handler {
 	r := chi.NewRouter()
 	QuizRoutes(r, repo)
@@ -165,6 +179,14 @@ func asQuizUser(r *http.Request, user *database.User) *http.Request {
 func TestQuizPage(t *testing.T) {
 	questions := quizFixtures()
 	user := &database.User{ID: uuid.New(), IsAnonymous: true}
+	topicQuestions := quizTopicFixtures()
+	// answeredFirst has attempted the first database question only.
+	answeredFirst := []database.QuizAttempt{{QuestionID: topicQuestions[1].ID, UserID: user.ID}}
+	// answeredAll has attempted both database questions.
+	answeredAll := []database.QuizAttempt{
+		{QuestionID: topicQuestions[3].ID, UserID: user.ID},
+		{QuestionID: topicQuestions[1].ID, UserID: user.ID},
+	}
 
 	tests := []struct {
 		name         string
@@ -269,6 +291,85 @@ func TestQuizPage(t *testing.T) {
 				`data-testid="quiz-question"`,
 			},
 		},
+		// Per-topic entry (#118): the explainer hands off with ?topic=<slug> and
+		// the quiz lands on that topic instead of the generic first question.
+		{
+			name:       "topic entry lands on the first question of that topic",
+			target:     "/learn/quiz?topic=database",
+			repo:       &fakeQuizRepo{questions: topicQuestions},
+			user:       user,
+			wantStatus: http.StatusOK,
+			wantContains: []string{
+				"What scopes every query to the requesting user?",
+				`action="/learn/quiz/rls-scoping/answer?topic=database"`,
+			},
+			wantAbsent: []string{
+				"Which router assembles the middleware stack?",
+			},
+		},
+		{
+			name:       "topic entry prefers a question the user has not attempted",
+			target:     "/learn/quiz?topic=database",
+			repo:       &fakeQuizRepo{questions: topicQuestions, history: answeredFirst},
+			user:       user,
+			wantStatus: http.StatusOK,
+			wantContains: []string{
+				"Where do the RLS policies live?",
+				`action="/learn/quiz/rls-policies/answer?topic=database"`,
+			},
+			wantAbsent: []string{
+				"What scopes every query to the requesting user?",
+			},
+		},
+		{
+			name:       "topic entry with every question attempted restarts the topic",
+			target:     "/learn/quiz?topic=database",
+			repo:       &fakeQuizRepo{questions: topicQuestions, history: answeredAll},
+			user:       user,
+			wantStatus: http.StatusOK,
+			wantContains: []string{
+				"What scopes every query to the requesting user?",
+			},
+		},
+		{
+			name:       "explicit slug inside the topic keeps the topic scope",
+			target:     "/learn/quiz?topic=database&q=rls-policies",
+			repo:       &fakeQuizRepo{questions: topicQuestions},
+			user:       user,
+			wantStatus: http.StatusOK,
+			wantContains: []string{
+				"Where do the RLS policies live?",
+				`action="/learn/quiz/rls-policies/answer?topic=database"`,
+			},
+		},
+		{
+			name:       "slug outside the topic is a 404",
+			target:     "/learn/quiz?topic=database&q=middleware-stack",
+			repo:       &fakeQuizRepo{questions: topicQuestions},
+			user:       user,
+			wantStatus: http.StatusNotFound,
+		},
+		{
+			name:       "unknown topic falls back to the full sequence",
+			target:     "/learn/quiz?topic=no-such-topic",
+			repo:       &fakeQuizRepo{questions: topicQuestions},
+			user:       user,
+			wantStatus: http.StatusOK,
+			wantContains: []string{
+				"Which router assembles the middleware stack?",
+				`action="/learn/quiz/middleware-stack/answer"`,
+			},
+			wantAbsent: []string{
+				"topic=",
+			},
+		},
+		{
+			name:       "attempt history failure on topic entry is a 500",
+			target:     "/learn/quiz?topic=database",
+			repo:       &fakeQuizRepo{questions: topicQuestions, listAttemptsErr: errFake},
+			user:       user,
+			wantStatus: http.StatusInternalServerError,
+		},
 	}
 
 	for _, tt := range tests {
@@ -312,6 +413,7 @@ func TestQuizAnswer(t *testing.T) {
 	tests := []struct {
 		name         string
 		slug         string
+		query        string // raw query string appended to the answer URL (topic scope)
 		form         url.Values
 		repo         *fakeQuizRepo
 		user         *database.User
@@ -451,11 +553,99 @@ func TestQuizAnswer(t *testing.T) {
 			wantStatus:   http.StatusSeeOther,
 			wantLocation: "/auth/page",
 		},
+		// Topic-scoped runs (#118): next/done are computed within the topic
+		// and every link carries the scope forward.
+		{
+			name:       "topic-scoped answer links to the next question in the topic",
+			slug:       "rls-scoping",
+			query:      "?topic=database",
+			form:       url.Values{"choice": {"0"}},
+			repo:       &fakeQuizRepo{questions: quizTopicFixtures()},
+			user:       user,
+			htmx:       true,
+			wantStatus: http.StatusOK,
+			wantContains: []string{
+				`data-testid="quiz-result"`,
+				"/learn/quiz?q=rls-policies&amp;topic=database",
+				"0 of 4", // the score stays whole-quiz, not per topic
+			},
+			wantAbsent: []string{
+				`data-testid="quiz-done"`,
+			},
+			wantAttempt: &database.CreateQuizAttemptParams{
+				UserID:        user.ID,
+				SelectedIndex: 0,
+				IsCorrect:     true,
+			},
+		},
+		{
+			name:       "last question of a topic marks the topic run done",
+			slug:       "rls-scoping",
+			query:      "?topic=database",
+			form:       url.Values{"choice": {"0"}},
+			repo:       &fakeQuizRepo{questions: questions},
+			user:       user,
+			htmx:       true,
+			wantStatus: http.StatusOK,
+			wantContains: []string{
+				`data-testid="quiz-done"`,
+				"last database question",
+				`href="/learn/quiz"`, // continue with the whole sequence
+			},
+			wantAttempt: &database.CreateQuizAttemptParams{
+				UserID:        user.ID,
+				SelectedIndex: 0,
+				IsCorrect:     true,
+			},
+		},
+		{
+			name:       "unknown topic on answer falls back to the full sequence",
+			slug:       "middleware-stack",
+			query:      "?topic=no-such-topic",
+			form:       url.Values{"choice": {"0"}},
+			repo:       &fakeQuizRepo{questions: questions},
+			user:       user,
+			htmx:       true,
+			wantStatus: http.StatusOK,
+			wantContains: []string{
+				"/learn/quiz?q=rls-scoping",
+			},
+			wantAbsent: []string{
+				"topic=",
+			},
+			wantAttempt: &database.CreateQuizAttemptParams{
+				UserID:        user.ID,
+				SelectedIndex: 0,
+				IsCorrect:     true,
+			},
+		},
+		{
+			name:       "slug outside the topic is a 404 and records nothing",
+			slug:       "middleware-stack",
+			query:      "?topic=database",
+			form:       url.Values{"choice": {"0"}},
+			repo:       &fakeQuizRepo{questions: questions},
+			user:       user,
+			wantStatus: http.StatusNotFound,
+		},
+		{
+			name:       "invalid choice re-render keeps the topic scope",
+			slug:       "rls-scoping",
+			query:      "?topic=database",
+			form:       url.Values{},
+			repo:       &fakeQuizRepo{questions: questions},
+			user:       user,
+			htmx:       true,
+			wantStatus: http.StatusUnprocessableEntity,
+			wantContains: []string{
+				`action="/learn/quiz/rls-scoping/answer?topic=database"`,
+			},
+		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			target := "/learn/quiz/" + tt.slug + "/answer"
+			target := "/learn/quiz/" + tt.slug + "/answer" + tt.query
 			req := httptest.NewRequest(http.MethodPost, target, strings.NewReader(tt.form.Encode()))
 			req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 			req = asQuizUser(req, tt.user)

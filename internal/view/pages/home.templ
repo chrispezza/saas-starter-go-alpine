@@ -2,6 +2,7 @@ package pages
 
 import (
 	"fmt"
+	"net/url"
 	"github.com/clownware/go-performance-starter/internal/view"
 	"github.com/clownware/go-performance-starter/internal/view/components"
 	"github.com/clownware/go-performance-starter/internal/view/layouts"
@@ -81,6 +82,11 @@ func homeSurfaces() []surface {
 			Description: "Your progress, live from your own rows: quiz score history and cards to review, loaded with the skeleton pattern.",
 		},
 	}
+}
+
+// quizTopicURL is the explainer's hand-off into the quiz on its own topic (#118).
+func quizTopicURL(topic string) string {
+	return "/learn/quiz?" + url.Values{"topic": {topic}}.Encode()
 }
 
 templ HomePage(props HomePageProps) {
@@ -169,7 +175,7 @@ templ explainer(nodes []ExplainerNode) {
 							</details>
 							<p class="mt-4 flex flex-wrap gap-x-4 gap-y-1 text-sm">
 								<a href={ templ.SafeURL(n.ADR.Href) } target="_blank" rel="noopener noreferrer" class="text-link hover:underline">{ n.ADR.Label } ↗</a>
-								<a href="/learn/quiz" class="text-link hover:underline">{ "Quiz yourself on " + n.QuizTopic + " →" }</a>
+								<a href={ templ.SafeURL(quizTopicURL(n.QuizTopic)) } class="text-link hover:underline">{ "Quiz yourself on " + n.QuizTopic + " →" }</a>
 							</p>
 						</div>
 					</div>
