@@ -12,6 +12,7 @@ import (
 	"fmt"
 	"github.com/clownware/go-performance-starter/internal/view"
 	"github.com/clownware/go-performance-starter/internal/view/components"
+	"net/url"
 )
 
 // QuizResultProps holds data for the answer result card (ADR-024).
@@ -20,8 +21,11 @@ type QuizResultProps struct {
 	Explanation string
 	// NextSlug is the following question in display order; empty when Done.
 	NextSlug string
-	// Done marks the last question answered.
+	// Done marks the last question answered — of the topic run when RunTopic
+	// is set (#118), otherwise of the whole sequence.
 	Done bool
+	// RunTopic scopes the run to one topic; empty for the full sequence.
+	RunTopic string
 	// OfferFlashcard renders the save-as-flashcard affordance (wrong answers).
 	// The endpoint it posts to ships in Slice B; the form is progressive
 	// enhancement either way.
@@ -31,8 +35,12 @@ type QuizResultProps struct {
 	Score          view.QuizScore
 }
 
-func quizNextURL(slug string) string {
-	return fmt.Sprintf("/learn/quiz?q=%s", slug)
+func quizNextURL(slug, runTopic string) string {
+	query := url.Values{"q": {slug}}
+	if runTopic != "" {
+		query.Set("topic", runTopic)
+	}
+	return "/learn/quiz?" + query.Encode()
 }
 
 // QuizResult renders the outcome of an answer: verdict, explanation, updated
@@ -80,7 +88,7 @@ func QuizResult(props QuizResultProps) templ.Component {
 		var templ_7745c5c3_Var2 string
 		templ_7745c5c3_Var2, templ_7745c5c3_Err = templ.JoinStringErrs(props.Explanation)
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/view/partials/quiz_result.templ`, Line: 42, Col: 37}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/view/partials/quiz_result.templ`, Line: 50, Col: 37}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var2))
 		if templ_7745c5c3_Err != nil {
@@ -110,7 +118,7 @@ func QuizResult(props QuizResultProps) templ.Component {
 			var templ_7745c5c3_Var3 string
 			templ_7745c5c3_Var3, templ_7745c5c3_Err = templ.ResolveAttributeValue(props.FlashcardFront)
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/view/partials/quiz_result.templ`, Line: 54, Col: 66}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/view/partials/quiz_result.templ`, Line: 62, Col: 66}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var3)
 			if templ_7745c5c3_Err != nil {
@@ -123,7 +131,7 @@ func QuizResult(props QuizResultProps) templ.Component {
 			var templ_7745c5c3_Var4 string
 			templ_7745c5c3_Var4, templ_7745c5c3_Err = templ.ResolveAttributeValue(props.FlashcardBack)
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/view/partials/quiz_result.templ`, Line: 55, Col: 64}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/view/partials/quiz_result.templ`, Line: 63, Col: 64}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var4)
 			if templ_7745c5c3_Err != nil {
@@ -139,43 +147,71 @@ func QuizResult(props QuizResultProps) templ.Component {
 			return templ_7745c5c3_Err
 		}
 		if props.Done {
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 11, "<div data-testid=\"quiz-done\"><p class=\"font-medium mb-2\">That was the last question — quiz complete.</p><a href=\"/patterns\" class=\"text-link underline\">Explore the pattern showcase</a></div>")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 11, "<div data-testid=\"quiz-done\">")
+			if templ_7745c5c3_Err != nil {
+				return templ_7745c5c3_Err
+			}
+			if props.RunTopic != "" {
+				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 12, "<p class=\"font-medium mb-2\">")
+				if templ_7745c5c3_Err != nil {
+					return templ_7745c5c3_Err
+				}
+				var templ_7745c5c3_Var5 string
+				templ_7745c5c3_Var5, templ_7745c5c3_Err = templ.JoinStringErrs("That was the last " + props.RunTopic + " question.")
+				if templ_7745c5c3_Err != nil {
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/view/partials/quiz_result.templ`, Line: 72, Col: 88}
+				}
+				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var5))
+				if templ_7745c5c3_Err != nil {
+					return templ_7745c5c3_Err
+				}
+				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 13, "</p><a href=\"/learn/quiz\" hx-get=\"/learn/quiz\" hx-target=\"#quiz-card\" hx-swap=\"innerHTML\" class=\"btn btn-primary inline-block\">Continue with the full quiz</a>")
+				if templ_7745c5c3_Err != nil {
+					return templ_7745c5c3_Err
+				}
+			} else {
+				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 14, "<p class=\"font-medium mb-2\">That was the last question — quiz complete.</p><a href=\"/patterns\" class=\"text-link underline\">Explore the pattern showcase</a>")
+				if templ_7745c5c3_Err != nil {
+					return templ_7745c5c3_Err
+				}
+			}
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 15, "</div>")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
 		} else {
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 12, "<a href=\"")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 16, "<a href=\"")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			var templ_7745c5c3_Var5 templ.SafeURL
-			templ_7745c5c3_Var5, templ_7745c5c3_Err = templ.JoinURLErrs(templ.SafeURL(quizNextURL(props.NextSlug)))
+			var templ_7745c5c3_Var6 templ.SafeURL
+			templ_7745c5c3_Var6, templ_7745c5c3_Err = templ.JoinURLErrs(templ.SafeURL(quizNextURL(props.NextSlug, props.RunTopic)))
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/view/partials/quiz_result.templ`, Line: 68, Col: 54}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/view/partials/quiz_result.templ`, Line: 89, Col: 70}
 			}
-			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var5))
-			if templ_7745c5c3_Err != nil {
-				return templ_7745c5c3_Err
-			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 13, "\" hx-get=\"")
+			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var6))
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			var templ_7745c5c3_Var6 string
-			templ_7745c5c3_Var6, templ_7745c5c3_Err = templ.ResolveAttributeValue(quizNextURL(props.NextSlug))
-			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/view/partials/quiz_result.templ`, Line: 69, Col: 41}
-			}
-			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var6)
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 17, "\" hx-get=\"")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 14, "\" hx-target=\"#quiz-card\" hx-swap=\"innerHTML\" class=\"btn btn-primary inline-block\">Next question</a>")
+			var templ_7745c5c3_Var7 string
+			templ_7745c5c3_Var7, templ_7745c5c3_Err = templ.ResolveAttributeValue(quizNextURL(props.NextSlug, props.RunTopic))
+			if templ_7745c5c3_Err != nil {
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/view/partials/quiz_result.templ`, Line: 90, Col: 57}
+			}
+			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var7)
+			if templ_7745c5c3_Err != nil {
+				return templ_7745c5c3_Err
+			}
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 18, "\" hx-target=\"#quiz-card\" hx-swap=\"innerHTML\" class=\"btn btn-primary inline-block\">Next question</a>")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 15, "</div></div>")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 19, "</div></div>")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
@@ -200,25 +236,25 @@ func QuizScoreBadge(score view.QuizScore) templ.Component {
 			}()
 		}
 		ctx = templ.InitializeContext(ctx)
-		templ_7745c5c3_Var7 := templ.GetChildren(ctx)
-		if templ_7745c5c3_Var7 == nil {
-			templ_7745c5c3_Var7 = templ.NopComponent
+		templ_7745c5c3_Var8 := templ.GetChildren(ctx)
+		if templ_7745c5c3_Var8 == nil {
+			templ_7745c5c3_Var8 = templ.NopComponent
 		}
 		ctx = templ.ClearChildren(ctx)
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 16, "<p data-testid=\"quiz-score\" class=\"text-sm text-muted-foreground\">")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 20, "<p data-testid=\"quiz-score\" class=\"text-sm text-muted-foreground\">")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		var templ_7745c5c3_Var8 string
-		templ_7745c5c3_Var8, templ_7745c5c3_Err = templ.JoinStringErrs(fmt.Sprintf("%d of %d", score.Correct, score.Total))
+		var templ_7745c5c3_Var9 string
+		templ_7745c5c3_Var9, templ_7745c5c3_Err = templ.JoinStringErrs(fmt.Sprintf("%d of %d", score.Correct, score.Total))
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/view/partials/quiz_result.templ`, Line: 84, Col: 55}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/view/partials/quiz_result.templ`, Line: 105, Col: 55}
 		}
-		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var8))
+		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var9))
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 17, " answered correctly</p>")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 21, " answered correctly</p>")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}

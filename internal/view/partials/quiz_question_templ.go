@@ -11,6 +11,7 @@ import templruntime "github.com/a-h/templ/runtime"
 import (
 	"fmt"
 	"github.com/clownware/go-performance-starter/internal/view/components"
+	"net/url"
 )
 
 // QuizQuestionProps holds data for the quiz question card (ADR-024).
@@ -21,10 +22,17 @@ type QuizQuestionProps struct {
 	Choices []string
 	// Error is the validation message shown when a submit had no usable choice.
 	Error string
+	// RunTopic scopes the run to one topic (#118); empty for the full sequence.
+	// Links carry it forward so next/done are computed within the topic.
+	RunTopic string
 }
 
-func quizAnswerAction(slug string) string {
-	return fmt.Sprintf("/learn/quiz/%s/answer", slug)
+func quizAnswerAction(slug, runTopic string) string {
+	action := "/learn/quiz/" + slug + "/answer"
+	if runTopic != "" {
+		action += "?" + url.Values{"topic": {runTopic}}.Encode()
+	}
+	return action
 }
 
 // QuizQuestionCard renders the answer form for one question. It is a
@@ -58,7 +66,7 @@ func QuizQuestionCard(props QuizQuestionProps) templ.Component {
 		var templ_7745c5c3_Var2 string
 		templ_7745c5c3_Var2, templ_7745c5c3_Err = templ.JoinStringErrs(props.Topic)
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/view/partials/quiz_question.templ`, Line: 30, Col: 85}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/view/partials/quiz_question.templ`, Line: 38, Col: 85}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var2))
 		if templ_7745c5c3_Err != nil {
@@ -71,7 +79,7 @@ func QuizQuestionCard(props QuizQuestionProps) templ.Component {
 		var templ_7745c5c3_Var3 string
 		templ_7745c5c3_Var3, templ_7745c5c3_Err = templ.JoinStringErrs(props.Prompt)
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/view/partials/quiz_question.templ`, Line: 31, Col: 55}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/view/partials/quiz_question.templ`, Line: 39, Col: 55}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var3))
 		if templ_7745c5c3_Err != nil {
@@ -89,7 +97,7 @@ func QuizQuestionCard(props QuizQuestionProps) templ.Component {
 			var templ_7745c5c3_Var4 string
 			templ_7745c5c3_Var4, templ_7745c5c3_Err = templ.JoinStringErrs(props.Error)
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/view/partials/quiz_question.templ`, Line: 33, Col: 57}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/view/partials/quiz_question.templ`, Line: 41, Col: 57}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var4))
 			if templ_7745c5c3_Err != nil {
@@ -105,9 +113,9 @@ func QuizQuestionCard(props QuizQuestionProps) templ.Component {
 			return templ_7745c5c3_Err
 		}
 		var templ_7745c5c3_Var5 templ.SafeURL
-		templ_7745c5c3_Var5, templ_7745c5c3_Err = templ.JoinURLErrs(templ.SafeURL(quizAnswerAction(props.Slug)))
+		templ_7745c5c3_Var5, templ_7745c5c3_Err = templ.JoinURLErrs(templ.SafeURL(quizAnswerAction(props.Slug, props.RunTopic)))
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/view/partials/quiz_question.templ`, Line: 37, Col: 55}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/view/partials/quiz_question.templ`, Line: 45, Col: 71}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var5))
 		if templ_7745c5c3_Err != nil {
@@ -118,9 +126,9 @@ func QuizQuestionCard(props QuizQuestionProps) templ.Component {
 			return templ_7745c5c3_Err
 		}
 		var templ_7745c5c3_Var6 string
-		templ_7745c5c3_Var6, templ_7745c5c3_Err = templ.ResolveAttributeValue(quizAnswerAction(props.Slug))
+		templ_7745c5c3_Var6, templ_7745c5c3_Err = templ.ResolveAttributeValue(quizAnswerAction(props.Slug, props.RunTopic))
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/view/partials/quiz_question.templ`, Line: 38, Col: 41}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/view/partials/quiz_question.templ`, Line: 46, Col: 57}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var6)
 		if templ_7745c5c3_Err != nil {
@@ -146,7 +154,7 @@ func QuizQuestionCard(props QuizQuestionProps) templ.Component {
 			var templ_7745c5c3_Var7 string
 			templ_7745c5c3_Var7, templ_7745c5c3_Err = templ.ResolveAttributeValue(fmt.Sprintf("%d", i))
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/view/partials/quiz_question.templ`, Line: 50, Col: 35}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/view/partials/quiz_question.templ`, Line: 58, Col: 35}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var7)
 			if templ_7745c5c3_Err != nil {
@@ -159,7 +167,7 @@ func QuizQuestionCard(props QuizQuestionProps) templ.Component {
 			var templ_7745c5c3_Var8 string
 			templ_7745c5c3_Var8, templ_7745c5c3_Err = templ.JoinStringErrs(choice)
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/view/partials/quiz_question.templ`, Line: 54, Col: 20}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/view/partials/quiz_question.templ`, Line: 62, Col: 20}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var8))
 			if templ_7745c5c3_Err != nil {

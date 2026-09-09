@@ -329,8 +329,10 @@ func TestServer_HomeExplainer(t *testing.T) {
 	if got := strings.Count(body, "<details"); got != 5 {
 		t.Errorf("explainer renders %d source peeks, want 5 (one <details> per node, no JS required)", got)
 	}
-	if !strings.Contains(body, `href="/learn/quiz"`) {
-		t.Error("explainer must hand off to the quiz (read → quiz → flashcards)")
+	for _, topic := range []string{"routing", "handlers", "database", "frontend", "performance"} {
+		if !strings.Contains(body, `href="/learn/quiz?topic=`+topic+`"`) {
+			t.Errorf("explainer must hand off to the quiz on its own topic %q (read → quiz → flashcards, #118)", topic)
+		}
 	}
 
 	if !strings.Contains(body, `data-testid="perf-stats"`) {

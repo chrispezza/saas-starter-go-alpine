@@ -2,6 +2,7 @@ package partials
 
 import (
 	"fmt"
+	"net/url"
 	"github.com/clownware/go-performance-starter/internal/view/components"
 )
 
@@ -13,10 +14,17 @@ type QuizQuestionProps struct {
 	Choices []string
 	// Error is the validation message shown when a submit had no usable choice.
 	Error string
+	// RunTopic scopes the run to one topic (#118); empty for the full sequence.
+	// Links carry it forward so next/done are computed within the topic.
+	RunTopic string
 }
 
-func quizAnswerAction(slug string) string {
-	return fmt.Sprintf("/learn/quiz/%s/answer", slug)
+func quizAnswerAction(slug, runTopic string) string {
+	action := "/learn/quiz/" + slug + "/answer"
+	if runTopic != "" {
+		action += "?" + url.Values{"topic": {runTopic}}.Encode()
+	}
+	return action
 }
 
 // QuizQuestionCard renders the answer form for one question. It is a
@@ -34,8 +42,8 @@ templ QuizQuestionCard(props QuizQuestionProps) {
 		}
 		<form
 			method="post"
-			action={ templ.SafeURL(quizAnswerAction(props.Slug)) }
-			hx-post={ quizAnswerAction(props.Slug) }
+			action={ templ.SafeURL(quizAnswerAction(props.Slug, props.RunTopic)) }
+			hx-post={ quizAnswerAction(props.Slug, props.RunTopic) }
 			hx-target="#quiz-card"
 			hx-swap="innerHTML"
 		>

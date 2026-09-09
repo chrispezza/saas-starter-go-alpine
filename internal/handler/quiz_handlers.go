@@ -8,6 +8,7 @@ import (
 
 	"github.com/a-h/templ"
 	"github.com/go-chi/chi/v5"
+	"github.com/google/uuid"
 
 	"github.com/clownware/go-performance-starter/internal/database"
 	"github.com/clownware/go-performance-starter/internal/repository"
@@ -32,6 +33,12 @@ import (
 // the question card; the answer form POSTs and works without JS (full result
 // page), while HTMX swaps just the card. A wrong answer offers "save as
 // flashcard" — the offer markup ships here, its endpoint ships in Slice B.
+//
+// Per-topic entry (#118): the landing explainer hands off with ?topic=<slug>.
+// A known topic narrows the run to that topic's questions (landing on one the
+// user has not attempted yet) and every link carries the scope forward; an
+// unknown topic is ignored so a stray query never changes behaviour. The
+// running score stays whole-quiz — it counts rows, not runs.
 
 // QuizRoutes registers the quiz flow backed by the RLS-scoped quiz repository.
 func QuizRoutes(r chi.Router, repo repository.QuizRepository) {
@@ -71,15 +78,26 @@ func quizPage(repo repository.QuizRepository) http.HandlerFunc {
 			return
 		}
 
+		topic := resolveQuizTopic(questions, r.URL.Query().Get("topic"))
+		run := quizRun(questions, topic)
+
 		idx := 0
 		if slug := r.URL.Query().Get("q"); slug != "" {
 			var ok bool
-			if idx, ok = questionIndexBySlug(questions, slug); !ok {
+			if idx, ok = questionIndexBySlug(run, slug); !ok {
 				http.NotFound(w, r)
 				return
 			}
+		} else if topic != "" {
+			attempts, err := repo.ListAttemptsByUser(r.Context(), user.ID, quizTopicAttemptWindow, 0)
+			if err != nil {
+				slog.Error("Failed to list quiz attempts for topic entry", "topic", topic, "error", err)
+				http.Error(w, "Internal Server Error", http.StatusInternalServerError)
+				return
+			}
+			idx = firstUnattempted(run, attempts)
 		}
-		question := questions[idx]
+		question := run[idx]
 
 		choices, err := decodeQuizChoices(question.Choices)
 		if err != nil {
@@ -94,7 +112,7 @@ func quizPage(repo repository.QuizRepository) http.HandlerFunc {
 			return
 		}
 
-		qProps := quizQuestionProps(question, choices)
+		qProps := quizQuestionProps(question, choices, topic)
 		if view.IsHTMXRequest(r) {
 			renderQuiz(w, r, http.StatusOK, partials.QuizQuestionCard(qProps))
 			return
@@ -124,13 +142,16 @@ func quizAnswer(repo repository.QuizRepository) http.HandlerFunc {
 			return
 		}
 
+		topic := resolveQuizTopic(questions, r.URL.Query().Get("topic"))
+		run := quizRun(questions, topic)
+
 		slug := chi.URLParam(r, "slug")
-		idx, ok := questionIndexBySlug(questions, slug)
+		idx, ok := questionIndexBySlug(run, slug)
 		if !ok {
 			http.NotFound(w, r)
 			return
 		}
-		question := questions[idx]
+		question := run[idx]
 
 		choices, err := decodeQuizChoices(question.Choices)
 		if err != nil {
@@ -141,7 +162,7 @@ func quizAnswer(repo repository.QuizRepository) http.HandlerFunc {
 
 		selected, err := strconv.Atoi(r.PostFormValue("choice"))
 		if err != nil || selected < 0 || selected >= len(choices) {
-			qProps := quizQuestionProps(question, choices)
+			qProps := quizQuestionProps(question, choices, topic)
 			qProps.Error = "Pick one of the answers before checking."
 			if view.IsHTMXRequest(r) {
 				renderQuiz(w, r, http.StatusUnprocessableEntity, partials.QuizQuestionCard(qProps))
@@ -177,14 +198,15 @@ func quizAnswer(repo repository.QuizRepository) http.HandlerFunc {
 		resProps := partials.QuizResultProps{
 			Correct:        isCorrect,
 			Explanation:    question.Explanation,
-			Done:           idx == len(questions)-1,
+			Done:           idx == len(run)-1,
+			RunTopic:       topic,
 			OfferFlashcard: !isCorrect,
 			FlashcardFront: question.Prompt,
 			FlashcardBack:  question.Explanation,
 			Score:          score,
 		}
 		if !resProps.Done {
-			resProps.NextSlug = questions[idx+1].Slug
+			resProps.NextSlug = run[idx+1].Slug
 		}
 
 		if view.IsHTMXRequest(r) {
@@ -198,6 +220,51 @@ func quizAnswer(repo repository.QuizRepository) http.HandlerFunc {
 		}
 		renderQuiz(w, r, http.StatusOK, pages.QuizPage(props))
 	}
+}
+
+// quizTopicAttemptWindow bounds the attempt history read on topic entry:
+// far more than the seeded question count, without an unbounded scan.
+const quizTopicAttemptWindow = 200
+
+// resolveQuizTopic validates a requested topic against the question set.
+// Unknown or empty topics resolve to "" — the full sequence — so a stray
+// ?topic= neither changes behaviour nor gets echoed into links.
+func resolveQuizTopic(questions []database.QuizQuestion, topic string) string {
+	for i := range questions {
+		if questions[i].Topic == topic {
+			return topic
+		}
+	}
+	return ""
+}
+
+// quizRun narrows the display order to one topic; "" keeps the whole sequence.
+func quizRun(questions []database.QuizQuestion, topic string) []database.QuizQuestion {
+	if topic == "" {
+		return questions
+	}
+	run := make([]database.QuizQuestion, 0, len(questions))
+	for _, q := range questions {
+		if q.Topic == topic {
+			run = append(run, q)
+		}
+	}
+	return run
+}
+
+// firstUnattempted picks the topic-entry question: the first in the run the
+// user has never attempted, or the first in the run once all are attempted.
+func firstUnattempted(run []database.QuizQuestion, attempts []database.QuizAttempt) int {
+	attempted := make(map[uuid.UUID]struct{}, len(attempts))
+	for _, a := range attempts {
+		attempted[a.QuestionID] = struct{}{}
+	}
+	for i := range run {
+		if _, ok := attempted[run[i].ID]; !ok {
+			return i
+		}
+	}
+	return 0
 }
 
 // questionIndexBySlug finds a question's position in display order.
@@ -227,13 +294,15 @@ func quizScore(r *http.Request, repo repository.QuizRepository, user *database.U
 	return view.QuizScore{Correct: int(correct), Total: total}, nil
 }
 
-// quizQuestionProps maps a database question to its card props.
-func quizQuestionProps(q database.QuizQuestion, choices []string) partials.QuizQuestionProps {
+// quizQuestionProps maps a database question to its card props; runTopic is
+// the topic scope the card's links must carry forward ("" for the full run).
+func quizQuestionProps(q database.QuizQuestion, choices []string, runTopic string) partials.QuizQuestionProps {
 	return partials.QuizQuestionProps{
-		Slug:    q.Slug,
-		Topic:   q.Topic,
-		Prompt:  q.Prompt,
-		Choices: choices,
+		Slug:     q.Slug,
+		Topic:    q.Topic,
+		Prompt:   q.Prompt,
+		Choices:  choices,
+		RunTopic: runTopic,
 	}
 }
 
