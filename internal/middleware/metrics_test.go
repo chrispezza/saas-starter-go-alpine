@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
+	"regexp"
 	"strings"
 	"sync"
 	"testing"
@@ -220,5 +221,54 @@ func TestMetrics_SlowRequestLogged(t *testing.T) {
 	})).ServeHTTP(httptest.NewRecorder(), slow)
 	if !strings.Contains(logged(), "slow request detected") {
 		t.Error("request over the p95 budget must log a slow-request warning")
+	}
+}
+
+// TestMetrics_ServerTiming pins the Server-Timing header (ADR-034): the
+// handler's time to first byte, committed with the headers whether the
+// handler calls WriteHeader explicitly or writes the body straight away.
+func TestMetrics_ServerTiming(t *testing.T) {
+	tests := []struct {
+		name string
+		next http.HandlerFunc
+	}{
+		{
+			name: "explicit WriteHeader",
+			next: func(w http.ResponseWriter, r *http.Request) {
+				w.WriteHeader(http.StatusCreated)
+				_, _ = w.Write([]byte("ok"))
+			},
+		},
+		{
+			name: "implicit header via Write",
+			next: func(w http.ResponseWriter, r *http.Request) {
+				_, _ = w.Write([]byte("ok"))
+			},
+		},
+	}
+	re := regexp.MustCompile(`^app;dur=\d+(\.\d+)?$`)
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			w := httptest.NewRecorder()
+			Metrics(tt.next).ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/timing", nil))
+			got := w.Header().Get("Server-Timing")
+			if !re.MatchString(got) {
+				t.Errorf("Server-Timing = %q, want app;dur=<ms>", got)
+			}
+		})
+	}
+}
+
+// TestMetrics_RecordsLatencyForObserver pins the feed for the landing page's
+// observed column: every request through the middleware lands one sample
+// in the process observer.
+func TestMetrics_RecordsLatencyForObserver(t *testing.T) {
+	before := performance.Default.Snapshot().Samples
+	w := httptest.NewRecorder()
+	Metrics(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	})).ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/observed", nil))
+	if after := performance.Default.Snapshot().Samples; after != before+1 {
+		t.Errorf("observer samples = %d, want %d (one per request)", after, before+1)
 	}
 }

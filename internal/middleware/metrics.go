@@ -1,6 +1,7 @@
 package middleware
 
 import (
+	"fmt"
 	"log/slog"
 	"net/http"
 	"strconv"
@@ -78,19 +79,36 @@ var (
 	)
 )
 
-// responseWriter wraps http.ResponseWriter to capture status code and bytes written
+// responseWriter wraps http.ResponseWriter to capture status code and bytes
+// written, and to stamp Server-Timing the moment headers are committed —
+// the handler's time to first byte, visible in any browser's devtools
+// (ADR-034). Headers cannot change once the body streams, so the stamp
+// rides the first WriteHeader or Write, whichever comes first.
 type responseWriter struct {
 	http.ResponseWriter
 	statusCode   int
 	bytesWritten int
+	start        time.Time
+	wroteHeader  bool
 }
 
 func (rw *responseWriter) WriteHeader(code int) {
+	if rw.wroteHeader {
+		return
+	}
+	rw.wroteHeader = true
 	rw.statusCode = code
+	if !rw.start.IsZero() {
+		ms := float64(time.Since(rw.start).Microseconds()) / 1000
+		rw.Header().Set("Server-Timing", fmt.Sprintf("app;dur=%.1f", ms))
+	}
 	rw.ResponseWriter.WriteHeader(code)
 }
 
 func (rw *responseWriter) Write(b []byte) (int, error) {
+	if !rw.wroteHeader {
+		rw.WriteHeader(http.StatusOK)
+	}
 	n, err := rw.ResponseWriter.Write(b)
 	rw.bytesWritten += n
 	return n, err
@@ -107,6 +125,7 @@ func Metrics(next http.Handler) http.Handler {
 		ww := &responseWriter{
 			ResponseWriter: w,
 			statusCode:     http.StatusOK,
+			start:          start,
 		}
 
 		// Get route pattern (e.g., /api/posts/{id})
@@ -129,6 +148,9 @@ func Metrics(next http.Handler) http.Handler {
 		httpRequestsTotal.WithLabelValues(r.Method, routePattern, status).Inc()
 		httpRequestDuration.WithLabelValues(r.Method, routePattern, status).Observe(durationSeconds)
 		httpResponseSize.WithLabelValues(r.Method, routePattern).Observe(float64(ww.bytesWritten))
+
+		// Feed the process observer (landing page observed column, ADR-034)
+		performance.Default.RecordLatency(duration)
 
 		// Check performance budgets
 		checkPerformanceBudget(duration, routePattern, r.Method)
@@ -172,6 +194,7 @@ func getRoutePattern(r *http.Request) string {
 
 // UpdateMemoryMetrics updates memory usage metrics
 func UpdateMemoryMetrics() {
+	performance.Default.ObserveMemory() // advance the peak high-water mark (ADR-034)
 	stats := performance.GetMemoryStats()
 
 	if allocMB, ok := stats["alloc_mb"].(float64); ok {

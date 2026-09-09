@@ -5,6 +5,7 @@ import (
 	"compress/gzip"
 	"fmt"
 	"os"
+	"path/filepath"
 	"runtime"
 	"time"
 )
@@ -196,4 +197,22 @@ func GetMemoryStats() map[string]interface{} {
 		"heap_objects":    m.HeapObjects,
 		"stack_in_use_mb": float64(m.StackInuse) / 1024 / 1024,
 	}
+}
+
+// ShippedJS and ShippedCSS are the assets the base layout ships, relative to
+// the static root. They are stated once here so the CI gate
+// (scripts/check-asset-budgets) and the runtime observer (ADR-034) measure
+// exactly the same files.
+var (
+	ShippedJS  = []string{"js/htmx.min.js", "js/alpine.min.js", "js/app.js"}
+	ShippedCSS = []string{"css/app.css"}
+)
+
+// ShippedAssetPaths joins the relative asset list onto a static root.
+func ShippedAssetPaths(staticDir string, rel []string) []string {
+	out := make([]string, 0, len(rel))
+	for _, r := range rel {
+		out = append(out, filepath.Join(staticDir, filepath.FromSlash(r)))
+	}
+	return out
 }

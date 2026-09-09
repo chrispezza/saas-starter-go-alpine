@@ -2,6 +2,8 @@ package handler
 
 import (
 	"fmt"
+	"math"
+	"time"
 
 	"github.com/clownware/go-performance-starter/internal/performance"
 	"github.com/clownware/go-performance-starter/internal/view/pages"
@@ -156,10 +158,10 @@ templ QuizQuestionCard(props QuizQuestionProps) {
 			Anchor:    "performance",
 			QuizTopic: "performance",
 			Title:     "Performance budgets, enforced in CI and observed in production",
-			Summary:   "Binary, memory, startup and gzipped JS/CSS budgets are constants in Go, gated by task ci, and observed via Prometheus — the numbers below are rendered from those constants on every request.",
+			Summary:   "Binary, memory, startup and gzipped JS/CSS budgets are constants in Go, gated by task ci — and the grid below puts what this very process has observed since boot next to each one, on every request.",
 			Prose: []string{
 				"ADR-000 states the budgets once, in internal/performance/budgets.go. task ci builds the stripped binary and measures it, gzips the shipped JS and CSS and measures those, and runs the budget tests with the race detector — so a regression is a red build, not a slow page someone notices later.",
-				"At runtime the same constants feed this page: the stats grid is not a hardcoded list, it is a handler reading the constants and a templ component rendering them — dynamic server-rendered content with zero client JavaScript. Request latency and memory are exported to Prometheus at /metrics (bearer-gated in production).",
+				"At runtime the same constants feed this page next to live readings: the metrics middleware records every request into a rolling window, the runtime reports memory, main records process start → listening, and the shipped assets and executable are measured once. A handler reads all of that and a templ component renders it — dynamic server-rendered content with zero client JavaScript. Every response also carries a Server-Timing header, so your browser's devtools show the handler time for this page. Prometheus at /metrics (bearer-gated in production) has the long-run view.",
 			},
 			ADR: adrLink("ADR-000-Performance-Budgets-and-Quality-Attributes.md", "ADR-000 performance budgets · ADR-021 quality gate"),
 			Source: pages.ExplainerSource{
@@ -181,20 +183,62 @@ templ QuizQuestionCard(props QuizQuestionProps) {
 
 // PerfBudgetStats renders the ADR-000 budgets from the constants in
 // internal/performance — never from literals here, so the landing page can
-// only ever show what CI actually enforces.
-func PerfBudgetStats() []pages.BudgetStat {
-	return []pages.BudgetStat{
-		{Label: "P50 response", Value: performance.MaxP50ResponseTime.String(), Note: "median latency target"},
-		{Label: "P95 response", Value: performance.MaxP95ResponseTime.String(), Note: "enforced by the budget tests"},
-		{Label: "P99 response", Value: performance.MaxP99ResponseTime.String(), Note: "tail latency ceiling"},
-		{Label: "Binary size", Value: formatBudgetBytes(performance.MaxBinarySize), Note: "stripped linux build, gated in task ci"},
-		{Label: "Memory", Value: formatBudgetBytes(performance.MaxMemoryUsage), Note: "steady state"},
-		{Label: "Peak memory", Value: formatBudgetBytes(performance.MaxPeakMemory), Note: "under load"},
-		{Label: "Startup", Value: performance.MaxStartupTime.String(), Note: "process start to listening"},
-		{Label: "JavaScript", Value: formatBudgetBytes(performance.MaxJavaScriptSize), Note: "gzipped — htmx + Alpine + app.js"},
-		{Label: "CSS", Value: formatBudgetBytes(performance.MaxCSSSize), Note: "gzipped Tailwind build"},
-		{Label: "Total page", Value: formatBudgetBytes(performance.MaxTotalPageSize), Note: "HTML + assets"},
+// only ever show what CI actually enforces — next to what this process has
+// observed since boot (ADR-034). A zero observation means unmeasured and is
+// rendered as such: a page that proves must never show a passing zero.
+func PerfBudgetStats(snap performance.Snapshot) []pages.BudgetStat {
+	const unmeasured = "—"
+	latency := func(label string, budget, observed time.Duration, note string) pages.BudgetStat {
+		s := pages.BudgetStat{Label: label, Budget: budget.String(), Class: string(performance.ClassMonitored), Note: note, Observed: unmeasured, Status: "unmeasured"}
+		if snap.Samples > 0 {
+			s.Observed = formatObservedDuration(observed)
+			s.Status = passFail(observed <= budget)
+			s.Note = fmt.Sprintf("%s · last %d requests", note, snap.Samples)
+		}
+		return s
 	}
+	size := func(label string, budget, observed int64, class performance.Class, note string) pages.BudgetStat {
+		s := pages.BudgetStat{Label: label, Budget: formatBudgetBytes(budget), Class: string(class), Note: note, Observed: unmeasured, Status: "unmeasured"}
+		if observed > 0 {
+			s.Observed = formatBudgetBytes(observed)
+			s.Status = passFail(observed <= budget)
+		}
+		return s
+	}
+	startup := pages.BudgetStat{Label: "Startup", Budget: performance.MaxStartupTime.String(), Class: string(performance.ClassMonitored), Note: "process start to listening socket", Observed: unmeasured, Status: "unmeasured"}
+	if snap.Startup > 0 {
+		startup.Observed = formatObservedDuration(snap.Startup)
+		startup.Status = passFail(snap.Startup <= performance.MaxStartupTime)
+	}
+	return []pages.BudgetStat{
+		latency("P50 response", performance.MaxP50ResponseTime, snap.P50, "median handler time"),
+		latency("P95 response", performance.MaxP95ResponseTime, snap.P95, "budget tests + slow-request log"),
+		latency("P99 response", performance.MaxP99ResponseTime, snap.P99, "tail latency ceiling"),
+		size("Binary size", performance.MaxBinarySize, snap.BinarySize, performance.ClassEnforced, "this executable; CI gates the stripped linux build"),
+		size("Memory", performance.MaxMemoryUsage, bytesInt64(snap.Sys), performance.ClassMonitored, "obtained from the OS by this process"),
+		size("Peak memory", performance.MaxPeakMemory, bytesInt64(snap.PeakSys), performance.ClassMonitored, "high-water mark since boot"),
+		startup,
+		size("JavaScript", performance.MaxJavaScriptSize, snap.JSGzipped, performance.ClassEnforced, "gzipped — htmx + Alpine + app.js, as shipped"),
+		size("CSS", performance.MaxCSSSize, snap.CSSGzipped, performance.ClassEnforced, "gzipped Tailwind build, as shipped"),
+		{Label: "Total page", Budget: formatBudgetBytes(performance.MaxTotalPageSize), Class: string(performance.ClassAspirational), Note: "HTML + assets — no measurement exists yet (ADR-000 §1)", Observed: unmeasured, Status: "unmeasured"},
+	}
+}
+
+func passFail(ok bool) string {
+	if ok {
+		return "pass"
+	}
+	return "fail"
+}
+
+// formatObservedDuration rounds to a tenth of a millisecond so a 12.34ms
+// reading prints as 12.3ms; anything below that resolution prints as
+// "<0.1ms" rather than the misleading "0s".
+func formatObservedDuration(d time.Duration) string {
+	if d < 100*time.Microsecond {
+		return "<0.1ms"
+	}
+	return d.Round(100 * time.Microsecond).String()
 }
 
 // formatBudgetBytes renders byte budgets in the units ADR-000 states them
@@ -214,4 +258,13 @@ func formatBudgetBytes(n int64) string {
 		return fmt.Sprintf("%d %cB", int64(value), "KMGTPE"[exp])
 	}
 	return fmt.Sprintf("%.1f %cB", value, "KMGTPE"[exp])
+}
+
+// bytesInt64 narrows a runtime byte count for comparison with the int64
+// budgets, saturating rather than wrapping on the (impossible) overflow.
+func bytesInt64(u uint64) int64 {
+	if u > math.MaxInt64 {
+		return math.MaxInt64
+	}
+	return int64(u)
 }

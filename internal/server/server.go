@@ -18,6 +18,7 @@ import (
 	"github.com/clownware/go-performance-starter/internal/database"
 	"github.com/clownware/go-performance-starter/internal/handler"
 	mw "github.com/clownware/go-performance-starter/internal/middleware"
+	"github.com/clownware/go-performance-starter/internal/performance"
 	"github.com/clownware/go-performance-starter/internal/repository/postgres"
 	"github.com/clownware/go-performance-starter/internal/view"
 	"github.com/clownware/go-performance-starter/internal/view/pages"
@@ -317,7 +318,7 @@ func homeHandler(w http.ResponseWriter, r *http.Request) {
 	props := pages.HomePageProps{
 		BaseProps: base,
 		Nodes:     handler.ExplainerNodes(),
-		Stats:     handler.PerfBudgetStats(),
+		Stats:     handler.PerfBudgetStats(performance.Default.Snapshot()),
 	}
 	if err := view.Render(w, r, http.StatusOK, pages.HomePage(props)); err != nil {
 		slog.Error("Failed to render home page", "error", err)

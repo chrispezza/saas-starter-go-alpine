@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"net"
 	"net/http"
 	"os"
 	"os/signal"
@@ -16,6 +17,7 @@ import (
 	"github.com/clownware/go-performance-starter/internal/config"
 	"github.com/clownware/go-performance-starter/internal/jobs"
 	"github.com/clownware/go-performance-starter/internal/middleware"
+	"github.com/clownware/go-performance-starter/internal/performance"
 	"github.com/clownware/go-performance-starter/internal/repository/postgres"
 	"github.com/clownware/go-performance-starter/internal/server"
 	"github.com/clownware/go-performance-starter/internal/view"
@@ -23,6 +25,10 @@ import (
 
 // version is set at build time via -ldflags "-X main.version=..."
 var version = "dev"
+
+// processStart anchors the ADR-000 startup budget: process start → listening
+// socket, recorded into the observer once the listener is bound (ADR-034).
+var processStart = time.Now()
 
 func main() {
 	// Manually load .env and set environment variables (before logger setup
@@ -126,10 +132,22 @@ func main() {
 	addr := fmt.Sprintf(":%s", cfg.HTTPPort)
 	httpServer := newHTTPServer(addr, srv)
 
-	// Start the server in a goroutine
+	// Bind first so "startup" means what ADR-000 says — process start to a
+	// listening socket — then serve on the bound listener.
+	ln, err := net.Listen("tcp", addr)
+	if err != nil {
+		slog.Error("Error binding listener", "addr", addr, "error", err)
+		os.Exit(1)
+	}
+	startup := time.Since(processStart)
+	performance.Default.RecordStartup(startup)
+	if err := performance.CheckStartupTime(startup); err != nil {
+		slog.Warn("startup budget exceeded", "error", err)
+	}
+	slog.Info("Server listening on "+addr, "startup_ms", startup.Milliseconds())
+
 	go func() {
-		slog.Info("Server listening on " + addr)
-		if err := httpServer.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+		if err := httpServer.Serve(ln); err != nil && err != http.ErrServerClosed {
 			slog.Error("Error starting server", "error", err)
 			os.Exit(1)
 		}
