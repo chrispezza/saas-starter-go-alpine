@@ -108,6 +108,9 @@ func TestGenerate(t *testing.T) {
 		want    string // exact output when non-empty
 		wantEnd string // required suffix when want is empty
 		wantErr string // substring of the error
+		// wantContains / wantAbsent pin the shape of a layer joint (#116).
+		wantContains string
+		wantAbsent   string
 	}{
 		{
 			name: "concatenates layers in order with demoted headings and root-relative links",
@@ -119,6 +122,24 @@ func TestGenerate(t *testing.T) {
 				files[".claude/stack.md"] = "# Stack\n\n###### Budgets\n\n\n\n"
 			},
 			wantEnd: "## Stack\n\n###### Budgets\n",
+		},
+		{
+			// A layer without a trailing newline used to yield "text\n---\n",
+			// which Markdown reads as a setext H2 underline, not a rule.
+			name: "layer without a trailing newline still joins with a thematic break",
+			files: func(files map[string]string) {
+				files[".claude/workflow.md"] = "# Workflow\n\nThree passes."
+			},
+			wantContains: "Three passes.\n\n---\n\n<!-- source: .claude/stack.md -->",
+			wantAbsent:   "Three passes.\n---",
+		},
+		{
+			name: "extra trailing newlines in a middle layer collapse before the joint",
+			files: func(files map[string]string) {
+				files[".claude/workflow.md"] = "# Workflow\n\nThree passes.\n\n\n\n"
+			},
+			wantContains: "Three passes.\n\n---\n\n<!-- source: .claude/stack.md -->",
+			wantAbsent:   "Three passes.\n\n\n",
 		},
 		{
 			name: "missing source layer errors naming the layer",
@@ -159,6 +180,12 @@ func TestGenerate(t *testing.T) {
 			}
 			if tt.want != "" && string(got) != tt.want {
 				t.Errorf("generated output mismatch\n--- got ---\n%s\n--- want ---\n%s", got, tt.want)
+			}
+			if tt.wantContains != "" && !strings.Contains(string(got), tt.wantContains) {
+				t.Errorf("output missing %q:\n%s", tt.wantContains, got)
+			}
+			if tt.wantAbsent != "" && strings.Contains(string(got), tt.wantAbsent) {
+				t.Errorf("output contains %q, want it absent:\n%s", tt.wantAbsent, got)
 			}
 			if tt.wantEnd != "" {
 				if !strings.HasSuffix(string(got), tt.wantEnd) {
@@ -249,6 +276,33 @@ func TestDemoteHeadings(t *testing.T) {
 			name: "empty input",
 			in:   "",
 			want: "",
+		},
+		// CommonMark ATX headings need a space, tab, or end of line after the
+		// opening hashes (#116); "#hashtag" is plain text.
+		{
+			name: "hashtag without a space is not a heading",
+			in:   "#hashtag",
+			want: "#hashtag",
+		},
+		{
+			name: "hashtag after a heading stays untouched while the heading is demoted",
+			in:   "# A\n#tag\n## B",
+			want: "## A\n#tag\n### B",
+		},
+		{
+			name: "hash followed by a tab is a heading",
+			in:   "#\tTabbed",
+			want: "##\tTabbed",
+		},
+		{
+			name: "empty heading of hashes alone is a heading",
+			in:   "##",
+			want: "###",
+		},
+		{
+			name: "seven hashes is not a heading",
+			in:   "####### Seven",
+			want: "####### Seven",
 		},
 	}
 	for _, tt := range tests {

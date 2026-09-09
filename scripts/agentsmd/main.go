@@ -83,7 +83,11 @@ func generate(root string) ([]byte, error) {
 		}
 		b.WriteString("\n---\n\n")
 		fmt.Fprintf(&b, "<!-- source: %s -->\n\n", rel)
-		b.WriteString(rewriteParentLinks(demoteHeadings(string(raw))))
+		// Normalize each layer to end with exactly one newline (#116): a layer
+		// without one would make the next joint "text\n---", which Markdown
+		// reads as a setext H2 underline rather than a thematic break.
+		layer := strings.TrimRight(string(raw), "\n") + "\n"
+		b.WriteString(rewriteParentLinks(demoteHeadings(layer)))
 	}
 
 	out := strings.TrimRight(b.String(), "\n") + "\n"
@@ -92,6 +96,8 @@ func generate(root string) ([]byte, error) {
 
 // demoteHeadings adds one '#' to every ATX heading, capping at H6, while leaving
 // content inside fenced code blocks untouched (so shell '#' comments survive).
+// Per CommonMark, an ATX heading is 1-6 hashes followed by a space, a tab, or
+// the end of the line — "#hashtag" is plain text and passes through (#116).
 func demoteHeadings(s string) string {
 	lines := strings.Split(s, "\n")
 	inFence := false
@@ -104,14 +110,25 @@ func demoteHeadings(s string) string {
 		if inFence {
 			continue
 		}
-		if strings.HasPrefix(line, "#") {
+		if isATXHeading(line) {
 			level := len(line) - len(strings.TrimLeft(line, "#"))
-			if level >= 1 && level <= 5 {
+			if level <= 5 {
 				lines[i] = "#" + line
 			}
 		}
 	}
 	return strings.Join(lines, "\n")
+}
+
+// isATXHeading reports whether line opens with 1-6 '#' followed by a space, a
+// tab, or the end of the line (CommonMark §4.2).
+func isATXHeading(line string) bool {
+	rest := strings.TrimLeft(line, "#")
+	level := len(line) - len(rest)
+	if level < 1 || level > 6 {
+		return false
+	}
+	return rest == "" || rest[0] == ' ' || rest[0] == '\t'
 }
 
 // rewriteParentLinks rewrites markdown link targets that climb out of the
