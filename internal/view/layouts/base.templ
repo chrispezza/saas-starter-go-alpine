@@ -85,8 +85,27 @@ templ Base(props view.BaseProps) {
 		<head>
 			<meta charset="UTF-8"/>
 			<meta name="viewport" content="width=device-width, initial-scale=1.0"/>
-			<meta name="description" content="Go Performance Starter"/>
+			<meta name="description" content={ props.MetaDescription() }/>
 			<title>{ props.Title }</title>
+			<!-- Share/crawl surface: canonical + og:url/og:image only when the
+			     public origin is configured (PUBLIC_BASE_URL) — never derived
+			     from the Host header. Query strings never reach the canonical. -->
+			if canonical := view.CanonicalURL(ctx); canonical != "" {
+				<link rel="canonical" href={ canonical }/>
+				<meta property="og:url" content={ canonical }/>
+			}
+			<meta property="og:type" content="website"/>
+			<meta property="og:site_name" content={ view.SiteName }/>
+			<meta property="og:title" content={ props.Title }/>
+			<meta property="og:description" content={ props.MetaDescription() }/>
+			if image := view.AbsoluteURL(view.AssetURL(view.OGImagePath)); image != "" {
+				<meta property="og:image" content={ image }/>
+				<meta property="og:image:width" content="1200"/>
+				<meta property="og:image:height" content="630"/>
+				<meta name="twitter:card" content="summary_large_image"/>
+			} else {
+				<meta name="twitter:card" content="summary"/>
+			}
 			<!-- CSS: AssetURL stamps ?v= so the 1-year cache busts per release
 			     (ADR-016). One stylesheet — the role tokens and their .dark
 			     overrides are compiled into app.css from input.css (ADR-029) -->

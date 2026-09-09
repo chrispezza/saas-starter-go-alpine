@@ -5,6 +5,8 @@ import (
 	"time"
 
 	"github.com/a-h/templ"
+
+	"github.com/clownware/go-performance-starter/internal/webutil"
 )
 
 // Render renders a templ component as an HTTP response with the given status code.
@@ -14,7 +16,9 @@ func Render(w http.ResponseWriter, r *http.Request, status int, component templ.
 	// headers can no longer be changed. Errors during rendering are
 	// logged by the caller but cannot change the response status.
 	w.WriteHeader(status)
-	return component.Render(r.Context(), w)
+	// The request path rides in the context so the layout can emit a
+	// canonical URL without ever reading the Host header.
+	return component.Render(webutil.WithRequestPath(r.Context(), r.URL.Path), w)
 }
 
 // CurrentYear returns the current calendar year.

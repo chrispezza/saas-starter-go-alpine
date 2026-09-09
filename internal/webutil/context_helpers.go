@@ -36,3 +36,18 @@ func GetUserRepoFromContext(ctx context.Context) repository.UserRepository {
 	repo, _ := ctx.Value(repoContextKey).(repository.UserRepository)
 	return repo
 }
+
+const requestPathContextKey contextKey = "requestPath"
+
+// WithRequestPath stores the request's URL path (no query string) so the
+// layout can derive canonical URLs; view.Render sets it for every page.
+func WithRequestPath(ctx context.Context, path string) context.Context {
+	return context.WithValue(ctx, requestPathContextKey, path)
+}
+
+// RequestPathFromContext returns the stored request path, or "" when the
+// component is rendered outside a request.
+func RequestPathFromContext(ctx context.Context) string {
+	path, _ := ctx.Value(requestPathContextKey).(string)
+	return path
+}
