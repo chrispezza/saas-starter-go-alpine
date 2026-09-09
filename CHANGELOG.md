@@ -8,6 +8,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- Rate-limit pattern (ADR-034) on `/patterns`: a button behind the
+  production `RateLimiter` on a deliberately tight tier (3 requests, then
+  one per 2s, per client IP). Refusals are real 429s rendered as fragments
+  — `app.js` now swaps a 429 that carries HTML — so the visitor watches
+  the tier say no. `RateLimiterWith` is the new seam: the limiter decides
+  and sets `Retry-After`, the caller supplies the refusal body
+
+### Fixed
+- Every 429 from the rate limiter now carries `Retry-After` (whole seconds,
+  rounded up, never 0) computed from the bucket's refill; a refused request
+  no longer costs a token
 - RLS isolation check (ADR-034) on the flashcards page: one click runs
   your own `ListFlashcardsByUser` twice through the same repository — as
   you, then as a freshly minted stranger identity — and shows both row

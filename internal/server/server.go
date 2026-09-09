@@ -235,7 +235,7 @@ func (s *Server) setupRoutes(ctx context.Context) {
 	}
 
 	// Pattern showcase (ADR-024 surface 2): public, stub data, no DB/auth.
-	handler.PatternsRoutes(r)
+	handler.PatternsRoutes(ctx, r)
 
 	// Quiz + flashcards + dashboard (ADR-024 surface 3): RLS-scoped
 	// persistence behind a browse-first identity chain. GuestSession issues

@@ -3,17 +3,21 @@ package handler
 import (
 	"net/http"
 	"net/http/httptest"
+	"strconv"
 	"strings"
 	"testing"
 
 	"github.com/go-chi/chi/v5"
+
+	"github.com/clownware/go-performance-starter/internal/view/partials"
 )
 
 // newPatternsRouter mounts the showcase routes exactly as production will, so
 // the tests encode the route shape itself, not just handler behaviour.
-func newPatternsRouter() http.Handler {
+func newPatternsRouter(t *testing.T) http.Handler {
+	t.Helper()
 	r := chi.NewRouter()
-	PatternsRoutes(r)
+	PatternsRoutes(t.Context(), r) // the demo limiter's eviction loop ends with the test (#117)
 	return r
 }
 
@@ -41,6 +45,8 @@ var patternSlugs = []string{
 	"loading-states",
 	"modal",
 	"global-store",
+	// ADR-034: the production limiter refusing, on purpose
+	"rate-limit",
 }
 
 func TestPatternsPage(t *testing.T) {
@@ -49,7 +55,7 @@ func TestPatternsPage(t *testing.T) {
 	req := httptest.NewRequest(http.MethodGet, "/patterns", nil)
 	w := httptest.NewRecorder()
 
-	newPatternsRouter().ServeHTTP(w, req)
+	newPatternsRouter(t).ServeHTTP(w, req)
 
 	if w.Code != http.StatusOK {
 		t.Fatalf("GET /patterns status = %d, want %d", w.Code, http.StatusOK)
@@ -215,7 +221,7 @@ func TestPatternsAPI(t *testing.T) {
 		},
 	}
 
-	router := newPatternsRouter()
+	router := newPatternsRouter(t)
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			req := httptest.NewRequest(tt.method, tt.target, nil)
@@ -285,7 +291,7 @@ func TestPatternsPageDiscovery(t *testing.T) {
 	req := httptest.NewRequest(http.MethodGet, "/patterns", nil)
 	w := httptest.NewRecorder()
 
-	newPatternsRouter().ServeHTTP(w, req)
+	newPatternsRouter(t).ServeHTTP(w, req)
 
 	if w.Code != http.StatusOK {
 		t.Fatalf("GET /patterns status = %d, want 200", w.Code)
@@ -303,5 +309,54 @@ func TestPatternsPageDiscovery(t *testing.T) {
 		if !strings.Contains(body, `id="`+slug+`"`) {
 			t.Errorf("pattern %q lost its section anchor in the grouped layout", slug)
 		}
+	}
+}
+
+// TestPatternRateLimit pins the rate-limit demo (ADR-034): the production
+// RateLimiter guards the endpoint with the tier the page advertises, the
+// refusal is an HTML fragment HTMX can swap, and it carries Retry-After.
+func TestPatternRateLimit(t *testing.T) {
+	router := newPatternsRouter(t)
+	send := func() *httptest.ResponseRecorder {
+		req := httptest.NewRequest(http.MethodGet, "/patterns/api/limited", nil)
+		req.RemoteAddr = "192.0.2.44:1"
+		req.Header.Set("HX-Request", "true")
+		w := httptest.NewRecorder()
+		router.ServeHTTP(w, req)
+		return w
+	}
+	for i := 1; i <= partials.PatternLimitBurst; i++ {
+		w := send()
+		if w.Code != http.StatusOK {
+			t.Fatalf("request %d: status = %d, want 200 (burst is %d)", i, w.Code, partials.PatternLimitBurst)
+		}
+		if !strings.Contains(w.Body.String(), `data-testid="limit-allowed"`) {
+			t.Errorf("request %d: body missing the allowed fragment", i)
+		}
+	}
+	w := send()
+	if w.Code != http.StatusTooManyRequests {
+		t.Fatalf("request %d: status = %d, want 429", partials.PatternLimitBurst+1, w.Code)
+	}
+	if got := w.Header().Get("Retry-After"); got != strconv.Itoa(partials.PatternLimitPerSeconds) {
+		t.Errorf("Retry-After = %q, want %q", got, strconv.Itoa(partials.PatternLimitPerSeconds))
+	}
+	if ct := w.Header().Get("Content-Type"); !strings.HasPrefix(ct, "text/html") {
+		t.Errorf("Content-Type = %q, want text/html so HTMX swaps the refusal", ct)
+	}
+	body := w.Body.String()
+	for _, want := range []string{`data-testid="limit-refused"`, "429", "Retry-After"} {
+		if !strings.Contains(body, want) {
+			t.Errorf("refusal body missing %q", want)
+		}
+	}
+
+	// A different client is a different bucket.
+	req := httptest.NewRequest(http.MethodGet, "/patterns/api/limited", nil)
+	req.RemoteAddr = "192.0.2.45:1"
+	other := httptest.NewRecorder()
+	router.ServeHTTP(other, req)
+	if other.Code != http.StatusOK {
+		t.Errorf("another client: status = %d, want 200 (per-IP buckets)", other.Code)
 	}
 }

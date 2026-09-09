@@ -254,3 +254,28 @@ templ PatternSlowContent() {
 		(hx-disabled-elt) and the spinner showed (hx-indicator).
 	</div>
 }
+
+// The demo rate-limit tier (ADR-034): PatternLimitBurst requests at once,
+// then one per PatternLimitPerSeconds. Stated here, beside the markup that
+// advertises it, and read by the handler that mounts the limiter.
+const (
+	PatternLimitBurst      = 3
+	PatternLimitPerSeconds = 2
+)
+
+// PatternLimitAllowed is one log line for a request the tier let through.
+templ PatternLimitAllowed(at string) {
+	<li data-testid="limit-allowed" class="flex items-center gap-2 text-sm py-1">
+		<span class="px-2 py-0.5 rounded-full bg-success/10 text-success text-xs font-medium tabular-nums">200 OK</span>
+		<span class="text-muted-foreground">{ "allowed at " + at }</span>
+	</li>
+}
+
+// PatternLimitRefused is the 429 the production limiter produced, rendered
+// as a fragment; retryAfter is the header value the middleware already set.
+templ PatternLimitRefused(retryAfter string) {
+	<li data-testid="limit-refused" class="flex items-center gap-2 text-sm py-1" role="status">
+		<span class="px-2 py-0.5 rounded-full bg-danger/10 text-danger text-xs font-medium tabular-nums">429 Too Many Requests</span>
+		<span class="text-muted-foreground">{ "Retry-After: " + retryAfter + "s — the limiter refused; no handler ran" }</span>
+	</li>
+}

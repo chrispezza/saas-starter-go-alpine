@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"context"
 	"fmt"
 	"log/slog"
 	"net/http"
@@ -12,6 +13,7 @@ import (
 	"github.com/a-h/templ"
 	"github.com/go-chi/chi/v5"
 
+	mw "github.com/clownware/go-performance-starter/internal/middleware"
 	"github.com/clownware/go-performance-starter/internal/view"
 	"github.com/clownware/go-performance-starter/internal/view/pages"
 	"github.com/clownware/go-performance-starter/internal/view/partials"
@@ -24,7 +26,8 @@ import (
 // docs/updates/ux-overhaul-spec.md.
 
 // PatternsRoutes registers the /patterns showcase page and its stub demo API.
-func PatternsRoutes(r chi.Router) {
+// ctx bounds the demo rate limiter's eviction loop (#117).
+func PatternsRoutes(ctx context.Context, r chi.Router) {
 	r.Get("/patterns", PatternsPage)
 	r.Route("/patterns/api", func(api chi.Router) {
 		api.Get("/swap", PatternSwap)
@@ -43,6 +46,12 @@ func PatternsRoutes(r chi.Router) {
 		api.Post("/confirm", PatternConfirm)      // hx-confirm + hx-disabled-elt
 		api.Get("/transition", PatternTransition) // View Transitions swap
 		api.Get("/slow", PatternSlow)             // hx-indicator + hx-disabled-elt
+		// The production limiter on a deliberately tight tier (ADR-034): the
+		// refusal is an HTML fragment so HTMX can show the 429 instead of
+		// failing silently. Tier constants live beside the demo markup.
+		api.With(mw.RateLimiterWith(ctx, 1/float64(partials.PatternLimitPerSeconds), partials.PatternLimitBurst,
+			http.HandlerFunc(PatternLimitRefused))).
+			Get("/limited", PatternLimitAllowed)
 	})
 }
 
@@ -63,7 +72,7 @@ var patternCategories = []view.PatternCategory{
 	{Slug: "fetch-swap", Title: "Fetch & swap", Blurb: "The core loop: an attribute fires a request, the server renders HTML, HTMX places it."},
 	{Slug: "search-lists", Title: "Search & lists", Blurb: "Server-filtered results with debounce, indicators, and pagination that loads itself."},
 	{Slug: "forms-actions", Title: "Forms & actions", Blurb: "Validation, editing, confirmation, and honest in-flight feedback — all server-round-trip."},
-	{Slug: "server-driven", Title: "Server-driven UX", Blurb: "Responses that steer the page: toasts from headers, multi-region swaps, animated transitions."},
+	{Slug: "server-driven", Title: "Server-driven UX", Blurb: "Responses that steer the page: toasts from headers, multi-region swaps, animated transitions — and an honest 429 when the server says no."},
 	{Slug: "alpine-islands", Title: "Alpine islands", Blurb: "The client-only slice: state, teleported modals, and stores shared across components."},
 }
 
@@ -353,6 +362,29 @@ view.Render(w, r, http.StatusOK,
   partials.PatternTransitionCard(step))`,
 	},
 	{
+		Slug:         "rate-limit",
+		Category:     "server-driven",
+		Title:        "Rate limit: 429 with Retry-After",
+		Summary:      "Click faster than the tier allows and the production limiter refuses — a real 429 with Retry-After, rendered instead of swallowed. Same middleware as the auth and /learn tiers, tighter numbers.",
+		HTMXFeatures: []string{`hx-swap="beforeend"`, "htmx:beforeSwap", "Retry-After"},
+		TemplSource: `<button hx-get="/patterns/api/limited"
+  hx-target="#limit-log" hx-swap="beforeend">
+  Hit the tier
+</button>
+<ol id="limit-log"></ol>
+<!-- app.js: swap 429s that carry HTML -->`,
+		HandlerSource: `api.With(mw.RateLimiterWith(ctx, 0.5, 3,
+  http.HandlerFunc(PatternLimitRefused))).
+  Get("/limited", PatternLimitAllowed)
+
+// the limiter sets Retry-After, then:
+func PatternLimitRefused(w, r) {
+  view.Render(w, r, http.StatusTooManyRequests,
+    partials.PatternLimitRefused(
+      w.Header().Get("Retry-After")))
+}`,
+	},
+	{
 		Slug:         "loading-states",
 		Category:     "forms-actions",
 		Title:        "Loading states",
@@ -594,6 +626,20 @@ func PatternSlow(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	renderPattern(w, r, "slow", partials.PatternSlowContent())
+}
+
+// PatternLimitAllowed answers a request the demo tier let through.
+func PatternLimitAllowed(w http.ResponseWriter, r *http.Request) {
+	renderPattern(w, r, "limited", partials.PatternLimitAllowed(time.Now().Format("15:04:05.000")))
+}
+
+// PatternLimitRefused is the refusal the production limiter hands the demo
+// (ADR-034): the verdict and Retry-After are the middleware's; this only
+// renders them as a fragment HTMX can swap.
+func PatternLimitRefused(w http.ResponseWriter, r *http.Request) {
+	if err := view.Render(w, r, http.StatusTooManyRequests, partials.PatternLimitRefused(w.Header().Get("Retry-After"))); err != nil {
+		slog.Error("Failed to render pattern fragment", "pattern", "limited", "error", err)
+	}
 }
 
 // renderPattern renders a demo fragment, logging render failures like every
