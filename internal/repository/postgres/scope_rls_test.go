@@ -130,3 +130,49 @@ func TestScopedUserProvisioning(t *testing.T) {
 		t.Errorf("creating another identity's row: err = %v, want RLS violation", err)
 	}
 }
+
+// TestScopedRepoStrangerIdentity is the Postgres leg of the flashcards
+// isolation check (ADR-034 TC-4): the visitor's own ListByUser — same SQL,
+// same user_id parameter — returns nothing when the transaction carries a
+// freshly minted identity that owns no users row. That is the policy
+// refusing, not a WHERE clause, which is exactly what the demo shows.
+func TestScopedRepoStrangerIdentity(t *testing.T) {
+	dsn := os.Getenv("DATABASE_URL")
+	if dsn == "" {
+		t.Skip("DATABASE_URL not set; skipping integration test")
+	}
+	ctx := context.Background()
+	pool, err := pgxpool.New(ctx, dsn)
+	if err != nil {
+		t.Fatalf("connect: %v", err)
+	}
+	t.Cleanup(pool.Close)
+
+	q := database.New(pool)
+	userA, authA := seedUserWithAuth(ctx, t, q)
+	t.Cleanup(func() {
+		_, _ = pool.Exec(ctx, "DELETE FROM flashcards WHERE user_id = $1", userA)
+		_, _ = pool.Exec(ctx, "DELETE FROM users WHERE id = $1", userA)
+	})
+	if _, err := q.CreateFlashcard(ctx, database.CreateFlashcardParams{UserID: userA, Front: "own-front", Back: "own-back"}); err != nil {
+		t.Fatalf("create card: %v", err)
+	}
+
+	repo := NewFlashcardRepo(pool, q)
+	own, err := repo.ListByUser(webutil.WithAuthClaims(ctx, webutil.AuthClaims{Sub: authA, Role: webutil.RoleAuthenticated}), userA)
+	if err != nil {
+		t.Fatalf("list as owner: %v", err)
+	}
+	if len(own) != 1 {
+		t.Fatalf("owner sees %d rows, want 1", len(own))
+	}
+
+	stranger := webutil.AuthClaims{Sub: uuid.NewString(), Role: webutil.RoleAuthenticated, IsAnonymous: true}
+	foreign, err := repo.ListByUser(webutil.WithAuthClaims(ctx, stranger), userA)
+	if err != nil {
+		t.Fatalf("list as stranger: %v", err)
+	}
+	if len(foreign) != 0 {
+		t.Errorf("stranger identity sees %d of user A's rows, want 0 (RLS not applied?)", len(foreign))
+	}
+}

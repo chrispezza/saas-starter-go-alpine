@@ -41,6 +41,8 @@ func FlashcardRoutes(r chi.Router, repo repository.FlashcardRepository) {
 	r.Post("/learn/flashcards", flashcardCreate(repo))
 	r.Post("/learn/flashcards/{id}/known", flashcardSetKnown(repo))
 	r.Post("/learn/flashcards/{id}/delete", flashcardDelete(repo))
+	// RLS isolation check (ADR-034): the proof lives next to the rows it proves.
+	r.Get("/learn/flashcards/isolation", flashcardIsolation(repo))
 }
 
 func flashcardsPage(repo repository.FlashcardRepository) http.HandlerFunc {
@@ -70,10 +72,22 @@ func flashcardsPage(repo repository.FlashcardRepository) http.HandlerFunc {
 			renderQuiz(w, r, http.StatusOK, partials.FlashcardList(listProps))
 			return
 		}
+
+		// ?check=1 is the no-JavaScript path of the isolation check (ADR-034).
+		isolation := isolationIdentity(r.Context(), user, len(cards))
+		if r.URL.Query().Get("check") == "1" && isolation.HasCards {
+			isolation, err = runIsolationCheck(r.Context(), repo, user)
+			if err != nil {
+				slog.Error("Isolation check failed", "error", err)
+				http.Error(w, "Internal Server Error", http.StatusInternalServerError)
+				return
+			}
+		}
 		props := pages.FlashcardsPageProps{
 			BaseProps:   view.NewBaseProps("Flashcards"),
 			GuestBanner: user.IsAnonymous,
 			Cards:       listProps.Cards,
+			Isolation:   isolation,
 		}
 		renderQuiz(w, r, http.StatusOK, pages.FlashcardsPage(props))
 	}

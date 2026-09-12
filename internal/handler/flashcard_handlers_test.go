@@ -21,6 +21,9 @@ import (
 // handler must never touch SQL directly (ADR-003), so this is the full seam.
 type fakeFlashcardRepo struct {
 	cards []database.Flashcard
+	// scoped makes ListByUser behave like RLS: rows come back only when the
+	// context claims name the owner (asFlashcardUser's "auth-<id>" sub).
+	scoped bool
 
 	createErr error
 	listErr   error
@@ -66,9 +69,15 @@ func (f *fakeFlashcardRepo) Get(_ context.Context, id uuid.UUID) (*database.Flas
 	return nil, repository.ErrNotFound
 }
 
-func (f *fakeFlashcardRepo) ListByUser(_ context.Context, _ uuid.UUID) ([]database.Flashcard, error) {
+func (f *fakeFlashcardRepo) ListByUser(ctx context.Context, userID uuid.UUID) ([]database.Flashcard, error) {
 	if f.listErr != nil {
 		return nil, f.listErr
+	}
+	if f.scoped {
+		claims, ok := webutil.AuthClaimsFromContext(ctx)
+		if !ok || claims.Sub != "auth-"+userID.String() {
+			return nil, nil // RLS: the policy hides rows the identity does not own
+		}
 	}
 	return f.cards, nil
 }
@@ -158,6 +167,7 @@ func TestFlashcardsPage(t *testing.T) {
 			wantContains: []string{
 				"<!doctype",
 				`data-testid="flashcard"`,
+				`data-testid="isolation-panel"`, // ADR-034: the RLS proof lives next to the rows it proves
 				"Which router assembles the middleware stack?",
 				"What scopes every query to the requesting user?",
 				`data-known="true"`,

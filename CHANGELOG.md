@@ -8,6 +8,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- RLS isolation check (ADR-034) on the flashcards page: one click runs
+  your own `ListFlashcardsByUser` twice through the same repository — as
+  you, then as a freshly minted stranger identity — and shows both row
+  counts next to the policy text. Zero rows for the stranger is Postgres
+  refusing the identical query, not a `WHERE` clause. Works without
+  JavaScript via `?check=1`; the HTMX endpoint is
+  `GET /learn/flashcards/isolation`. No other visitor's data is read
 - Observed-vs-budget grid (ADR-034): the landing page's budgets section now
   shows, per budget, what this process observed since boot — p50/p95/p99
   over the last 4096 requests, memory and its high-water mark, startup

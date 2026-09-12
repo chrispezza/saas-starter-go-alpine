@@ -22,6 +22,8 @@ type FlashcardsPageProps struct {
 	// GuestBanner marks an anonymous identity: offer the upgrade (#68).
 	GuestBanner bool
 	Cards       []partials.FlashcardProps
+	// Isolation is the RLS proof panel (ADR-034); rendered for identified visitors.
+	Isolation partials.IsolationProps
 }
 
 func FlashcardsPage(props FlashcardsPageProps) templ.Component {
@@ -82,7 +84,17 @@ func FlashcardsPage(props FlashcardsPageProps) templ.Component {
 					return templ_7745c5c3_Err
 				}
 			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 3, "</div></div>")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 3, "</div>")
+			if templ_7745c5c3_Err != nil {
+				return templ_7745c5c3_Err
+			}
+			if !props.Teaser {
+				templ_7745c5c3_Err = partials.IsolationPanel(props.Isolation).Render(ctx, templ_7745c5c3_Buffer)
+				if templ_7745c5c3_Err != nil {
+					return templ_7745c5c3_Err
+				}
+			}
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 4, "</div>")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
