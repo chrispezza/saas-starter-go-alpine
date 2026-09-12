@@ -123,3 +123,52 @@ func TestLoad_FromEnv(t *testing.T) {
 		})
 	}
 }
+
+// TestValidate_PublicBaseURL pins the contract for the optional public
+// origin: unset is fine (canonical links and the sitemap are simply
+// omitted), a valid absolute http(s) origin is normalized without a trailing
+// slash, and anything that is not an absolute origin fails fast at boot
+// (ADR-015) instead of producing broken canonical URLs.
+func TestValidate_PublicBaseURL(t *testing.T) {
+	tests := []struct {
+		name    string
+		base    string
+		wantErr bool
+		want    string // normalized value after Validate
+	}{
+		{name: "unset is allowed", base: "", want: ""},
+		{name: "https origin is kept", base: "https://demo.example.com", want: "https://demo.example.com"},
+		{name: "trailing slash is trimmed", base: "https://demo.example.com/", want: "https://demo.example.com"},
+		{name: "http origin is allowed for local previews", base: "http://localhost:4000", want: "http://localhost:4000"},
+		{name: "path prefix is kept without trailing slash", base: "https://example.com/demo/", want: "https://example.com/demo"},
+		{name: "scheme-less value is rejected", base: "demo.example.com", wantErr: true},
+		{name: "non-http scheme is rejected", base: "ftp://demo.example.com", wantErr: true},
+		{name: "query string is rejected", base: "https://demo.example.com/?x=1", wantErr: true},
+		{name: "fragment is rejected", base: "https://demo.example.com/#top", wantErr: true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			cfg := &Config{
+				Env:                 "development",
+				HTTPPort:            "4000",
+				DatabaseURL:         "postgres://localhost:5432/test",
+				DBMaxConns:          25,
+				MaxRequestBodyBytes: 1,
+				PublicBaseURL:       tt.base,
+			}
+			err := cfg.Validate()
+			if tt.wantErr {
+				if err == nil {
+					t.Fatalf("Validate() = nil, want error for PUBLIC_BASE_URL %q", tt.base)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("Validate() error = %v", err)
+			}
+			if cfg.PublicBaseURL != tt.want {
+				t.Errorf("PublicBaseURL after Validate = %q, want %q", cfg.PublicBaseURL, tt.want)
+			}
+		})
+	}
+}

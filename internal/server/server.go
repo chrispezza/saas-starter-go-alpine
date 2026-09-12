@@ -55,6 +55,9 @@ func New(cfg *config.Config, db *pgxpool.Pool) (*Server, error) {
 
 	r := chi.NewRouter()
 
+	// Public origin for canonical/og tags and the sitemap (empty omits them).
+	view.SetPublicBaseURL(cfg.PublicBaseURL)
+
 	ctx, stop := context.WithCancel(context.Background())
 	s := &Server{
 		router:     r,
@@ -198,6 +201,9 @@ func (s *Server) setupRoutes(ctx context.Context) {
 	r.Get("/terms", handler.TermsPage)
 	r.Get("/privacy", handler.PrivacyPage)
 
+	// Crawl policy + sitemap (sitemap only with a public origin)
+	handler.SEORoutes(r, s.cfg.PublicBaseURL)
+
 	// Logout GET route for UX (renders confirm form)
 	r.Get("/auth/logout", handler.LogoutPage)
 
@@ -306,8 +312,10 @@ func homeHandler(w http.ResponseWriter, r *http.Request) {
 	// The explainer spine and the live budget stats are built per request
 	// from code and constants (ADR-024 surface 1, #67) — server-rendered
 	// dynamic content is part of what the page demonstrates.
+	base := view.NewBaseProps("Go Performance Starter")
+	base.Description = view.DefaultDescription + " Demonstrated live: a pattern showcase, an architecture tour, and a quiz whose answers are real RLS-scoped rows."
 	props := pages.HomePageProps{
-		BaseProps: view.NewBaseProps("Go Performance Starter"),
+		BaseProps: base,
 		Nodes:     handler.ExplainerNodes(),
 		Stats:     handler.PerfBudgetStats(),
 	}

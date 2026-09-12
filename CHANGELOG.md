@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- Share and crawl surface: every page carries a real meta description,
+  Open Graph and Twitter card tags, and — when `PUBLIC_BASE_URL` is set —
+  a canonical link plus absolute `og:url`/`og:image` (a 1200×630 share
+  image ships at `/static/img/og.png`). `/robots.txt` disallows `/learn/*`
+  on purpose (its identity chain mints a real anonymous Supabase user on
+  first touch) and the per-user surfaces; `/sitemap.xml` lists the public
+  identity-free pages and exists only when the origin is configured, so
+  URLs are never guessed from the Host header. The README now links the
+  live demo
+
 ### Changed
 - `/health` readiness probe pings its dependency through a consumer-side
   `handler.Pinger` seam instead of importing `pgxpool` directly — the one

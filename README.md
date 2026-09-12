@@ -1,5 +1,7 @@
 # Go Performance Starter
 
+**Live demo:** [go-performance-starter.fly.dev](https://go-performance-starter.fly.dev) — [pattern showcase](https://go-performance-starter.fly.dev/patterns) · [architecture tour](https://go-performance-starter.fly.dev/#architecture) · [quiz + flashcards](https://go-performance-starter.fly.dev/learn/quiz) (you get a real anonymous identity on arrival; guest content resets nightly, [ADR-031](docs/adr/ADR-031-Public-Demo-Operations.md))
+
 A Go + HTMX SaaS starter built for **agent-assisted development** — a layered AI constitution and a halt-on-violation CI gate hold coding agents to the same rules as humans — with **multi-tenancy proven end-to-end**: Postgres Row Level Security scoped by real Supabase identities, exercised by the demo app itself rather than promised in a diagram.
 
 **Stack:** Go (Chi) | templ | HTMX + Alpine.js | Tailwind CSS | Supabase (Auth + PostgreSQL) | Cloudflare
@@ -9,7 +11,7 @@ A Go + HTMX SaaS starter built for **agent-assisted development** — a layered 
 ## What You Get
 
 - **Authentication** -- Supabase email/password auth with server-side JWT validation, plus anonymous guest sign-in (server-side GoTrue) so demo visitors get a real identity with zero signup friction ([ADR-024](docs/adr/ADR-024-Demo-Application-Direction.md))
-- **A demo that proves the stack** -- a [`/patterns`](docs/adr/ADR-024-Demo-Application-Direction.md) showcase of every HTMX/Alpine pattern the starter supports (live demo + source per pattern), and an architecture quiz whose wrong answers become saveable, per-user flashcards — real rows behind RLS, not an in-memory stub
+- **A demo that proves the stack** -- a [`/patterns`](https://go-performance-starter.fly.dev/patterns) showcase of every HTMX/Alpine pattern the starter supports (live demo + source per pattern), and an architecture quiz whose wrong answers become saveable, per-user flashcards — real rows behind RLS, not an in-memory stub
 - **Row Level Security** -- PostgreSQL RLS policies enforced at the database layer and integration-tested; request JWT claims ride into every query via a scoped transaction ([ADR-004](docs/adr/ADR-004-Authorization-Strategy-RLS.md))
 - **Type-safe templates** -- templ compiles HTML to Go; typed props, no `map[string]interface{}` (see [ADR-017](docs/adr/ADR-017-Templ-Adoption.md))
 - **Type-safe SQL** -- sqlc code generation with repository pattern

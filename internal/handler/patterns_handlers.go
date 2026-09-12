@@ -416,7 +416,7 @@ var patternTabs = map[string]string{
 // PatternsPage renders the full showcase.
 func PatternsPage(w http.ResponseWriter, r *http.Request) {
 	props := pages.PatternsPageProps{
-		BaseProps: view.NewBaseProps("Pattern Showcase"),
+		BaseProps: patternsBaseProps(),
 		Groups:    patternGroups(),
 	}
 	if err := view.Render(w, r, http.StatusOK, pages.PatternsPage(props)); err != nil {
@@ -618,4 +618,11 @@ func filterPatternStubData(q string) []string {
 		}
 	}
 	return results
+}
+
+// patternsBaseProps carries the showcase's own share description.
+func patternsBaseProps() view.BaseProps {
+	base := view.NewBaseProps("Pattern Showcase")
+	base.Description = "Every HTMX and Alpine.js pattern this Go starter supports, live, with the templ and handler source beside each demo."
+	return base
 }

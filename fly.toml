@@ -16,6 +16,9 @@ primary_region = "ewr"
 [env]
   ENV = "production"
   HTTP_PORT = "4000"
+  # Public origin for canonical links, Open Graph tags and the sitemap.
+  # Cloners: set your own domain (or leave unset — the tags are omitted).
+  PUBLIC_BASE_URL = "https://go-performance-starter.fly.dev"
   # Non-secret tuning lives here, versioned — not in `fly secrets` where it
   # becomes invisible and gets lost on app migrations.
   DB_MAX_CONNS = "10"

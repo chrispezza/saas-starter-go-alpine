@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"log/slog"
 	"net"
+	"net/url"
 	"strconv"
 	"strings"
 	"time"
@@ -43,6 +44,11 @@ type Config struct {
 	// handler reads it, bounding memory use on form/upload endpoints
 	// (2026-07-06 audit). Default 1 MiB.
 	MaxRequestBodyBytes int64 `envconfig:"MAX_REQUEST_BODY_BYTES" default:"1048576"`
+
+	// PublicBaseURL is the origin the app is reachable at from the internet
+	// (scheme + host, optional path prefix, no trailing slash). It feeds the
+	// canonical link, og:url/og:image and the sitemap; unset omits them.
+	PublicBaseURL string `envconfig:"PUBLIC_BASE_URL"`
 
 	// Database pool tuning (ADR-025; pgxpool defaults are too small for
 	// production — MaxConns defaults to max(4, CPUs)).
@@ -105,6 +111,13 @@ func (c *Config) Validate() error {
 	if c.MaxRequestBodyBytes < 1 {
 		return fmt.Errorf("MAX_REQUEST_BODY_BYTES %d invalid: must be at least 1", c.MaxRequestBodyBytes)
 	}
+	if c.PublicBaseURL != "" {
+		base, err := normalizePublicBaseURL(c.PublicBaseURL)
+		if err != nil {
+			return fmt.Errorf("PUBLIC_BASE_URL %q invalid: %w", c.PublicBaseURL, err)
+		}
+		c.PublicBaseURL = base
+	}
 	for _, cidr := range c.TrustedProxyCIDRs {
 		if strings.TrimSpace(cidr) == "" {
 			continue
@@ -145,4 +158,26 @@ func (c *Config) PoolConfig() (*pgxpool.Config, error) {
 	pc.MaxConnLifetime = c.DBMaxConnLifetime
 	pc.MaxConnIdleTime = c.DBMaxConnIdleTime
 	return pc, nil
+}
+
+// normalizePublicBaseURL accepts an absolute http(s) origin with an optional
+// path prefix and returns it without a trailing slash, so callers can join
+// request paths onto it verbatim. Query strings and fragments are rejected:
+// they can never be part of a canonical origin.
+func normalizePublicBaseURL(raw string) (string, error) {
+	u, err := url.Parse(strings.TrimSpace(raw))
+	if err != nil {
+		return "", err
+	}
+	if u.Scheme != "http" && u.Scheme != "https" {
+		return "", fmt.Errorf("scheme must be http or https")
+	}
+	if u.Host == "" {
+		return "", fmt.Errorf("host is required")
+	}
+	if u.RawQuery != "" || u.Fragment != "" {
+		return "", fmt.Errorf("must not carry a query string or fragment")
+	}
+	u.Path = strings.TrimRight(u.Path, "/")
+	return u.String(), nil
 }

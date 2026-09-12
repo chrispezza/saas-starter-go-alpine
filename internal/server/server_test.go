@@ -367,3 +367,164 @@ func TestServer_CloseIsIdempotentAndKeepsServing(t *testing.T) {
 		t.Fatalf("GET /healthz after Close() status = %d, want %d", rec.Code, http.StatusOK)
 	}
 }
+
+// TestServer_SEOHeadTags pins the share/crawl surface every page carries
+// through the base layout: a real meta description, Open Graph and Twitter
+// card tags, and — only when PUBLIC_BASE_URL is configured — a canonical
+// link and absolute og:url/og:image. Without the origin those absolute tags
+// are omitted rather than guessed from the Host header.
+func TestServer_SEOHeadTags(t *testing.T) {
+	tests := []struct {
+		name         string
+		base         string
+		target       string
+		wantContains []string
+		wantAbsent   []string
+	}{
+		{
+			name:   "public origin set: canonical and absolute og tags",
+			base:   "https://demo.example.com",
+			target: "/patterns?section=polling",
+			wantContains: []string{
+				`<link rel="canonical" href="https://demo.example.com/patterns"`,
+				`<meta property="og:url" content="https://demo.example.com/patterns"`,
+				`<meta property="og:image" content="https://demo.example.com/static/img/og.png`,
+				`<meta property="og:title" content="Pattern Showcase"`,
+				`<meta property="og:type" content="website"`,
+				`<meta name="twitter:card" content="summary_large_image"`,
+			},
+			wantAbsent: []string{`canonical" href="https://demo.example.com/patterns?`},
+		},
+		{
+			name:         "public origin unset: relative tags only",
+			base:         "",
+			target:       "/patterns",
+			wantContains: []string{`<meta property="og:title" content="Pattern Showcase"`, `<meta name="description" content="`},
+			wantAbsent:   []string{`rel="canonical"`, `property="og:url"`, `property="og:image"`},
+		},
+		{
+			name:         "home page carries its own description",
+			base:         "https://demo.example.com",
+			target:       "/",
+			wantContains: []string{`<link rel="canonical" href="https://demo.example.com/"`, `<meta name="description" content="A server-rendered Go + HTMX starter`},
+			wantAbsent:   []string{`<meta name="description" content="Go Performance Starter"`},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			cfg := testConfig("development")
+			cfg.PublicBaseURL = tt.base
+			srv := newServer(t, cfg, nil)
+
+			rec := httptest.NewRecorder()
+			srv.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, tt.target, nil))
+			if rec.Code != http.StatusOK {
+				t.Fatalf("GET %s status = %d, want 200", tt.target, rec.Code)
+			}
+			body := rec.Body.String()
+			for _, want := range tt.wantContains {
+				if !strings.Contains(body, want) {
+					t.Errorf("GET %s missing %q", tt.target, want)
+				}
+			}
+			for _, absent := range tt.wantAbsent {
+				if strings.Contains(body, absent) {
+					t.Errorf("GET %s must not contain %q", tt.target, absent)
+				}
+			}
+		})
+	}
+}
+
+// TestServer_RobotsAndSitemap pins the crawl policy. /learn/* is disallowed
+// on purpose: its identity chain mints a real anonymous Supabase user on
+// first touch (ADR-024), so every crawler hit would create an account for
+// the reaper to clean up. The sitemap lists only the public, identity-free
+// pages and exists only when the public origin is known (sitemap URLs must
+// be absolute).
+func TestServer_RobotsAndSitemap(t *testing.T) {
+	withBase := testConfig("production")
+	withBase.PublicBaseURL = "https://demo.example.com"
+	withoutBase := testConfig("production")
+
+	tests := []struct {
+		name         string
+		cfg          *config.Config
+		target       string
+		wantStatus   int
+		wantType     string
+		wantContains []string
+		wantAbsent   []string
+	}{
+		{
+			name:       "robots.txt with a public origin advertises the sitemap",
+			cfg:        withBase,
+			target:     "/robots.txt",
+			wantStatus: http.StatusOK,
+			wantType:   "text/plain",
+			wantContains: []string{
+				"User-agent: *",
+				"Disallow: /learn/",
+				"Disallow: /dashboard",
+				"Disallow: /auth/",
+				"Disallow: /profile",
+				"Disallow: /patterns/api/",
+				"Sitemap: https://demo.example.com/sitemap.xml",
+			},
+		},
+		{
+			name:         "robots.txt without a public origin has no sitemap line",
+			cfg:          withoutBase,
+			target:       "/robots.txt",
+			wantStatus:   http.StatusOK,
+			wantType:     "text/plain",
+			wantContains: []string{"User-agent: *", "Disallow: /learn/"},
+			wantAbsent:   []string{"Sitemap:"},
+		},
+		{
+			name:       "sitemap lists the public identity-free pages",
+			cfg:        withBase,
+			target:     "/sitemap.xml",
+			wantStatus: http.StatusOK,
+			wantType:   "application/xml",
+			wantContains: []string{
+				`<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">`,
+				"<loc>https://demo.example.com/</loc>",
+				"<loc>https://demo.example.com/patterns</loc>",
+				"<loc>https://demo.example.com/terms</loc>",
+				"<loc>https://demo.example.com/privacy</loc>",
+			},
+			wantAbsent: []string{"/learn/", "/dashboard", "/auth/"},
+		},
+		{
+			name:       "sitemap is absent without a public origin",
+			cfg:        withoutBase,
+			target:     "/sitemap.xml",
+			wantStatus: http.StatusNotFound,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			srv := newServer(t, tt.cfg, nil)
+			rec := httptest.NewRecorder()
+			srv.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, tt.target, nil))
+			if rec.Code != tt.wantStatus {
+				t.Fatalf("GET %s status = %d, want %d", tt.target, rec.Code, tt.wantStatus)
+			}
+			if tt.wantType != "" && !strings.HasPrefix(rec.Header().Get("Content-Type"), tt.wantType) {
+				t.Errorf("GET %s Content-Type = %q, want prefix %q", tt.target, rec.Header().Get("Content-Type"), tt.wantType)
+			}
+			body := rec.Body.String()
+			for _, want := range tt.wantContains {
+				if !strings.Contains(body, want) {
+					t.Errorf("GET %s missing %q in:\n%s", tt.target, want, body)
+				}
+			}
+			for _, absent := range tt.wantAbsent {
+				if strings.Contains(body, absent) {
+					t.Errorf("GET %s must not contain %q", tt.target, absent)
+				}
+			}
+		})
+	}
+}
