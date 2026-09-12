@@ -1,7 +1,8 @@
 // Command check-asset-budgets enforces the ADR-000 frontend budgets against
 // the assets the base layout actually ships (internal/view/layouts/base.templ).
-// Sizes are measured gzipped — what crosses the wire — so the budgets in
-// internal/performance are the single source of truth. Run from the repo root.
+// Sizes are measured gzipped — what crosses the wire — so the budgets AND the
+// file lists in internal/performance are the single source of truth (the
+// runtime observer measures the same files, ADR-034). Run from the repo root.
 package main
 
 import (
@@ -19,16 +20,12 @@ var checks = []struct {
 	{
 		name:   "JavaScript Bundle",
 		budget: performance.MaxJavaScriptSize,
-		files: []string{
-			"web/static/js/htmx.min.js",
-			"web/static/js/alpine.min.js",
-			"web/static/js/app.js",
-		},
+		files:  performance.ShippedAssetPaths("web/static", performance.ShippedJS),
 	},
 	{
 		name:   "CSS Bundle",
 		budget: performance.MaxCSSSize,
-		files:  []string{"web/static/css/app.css"},
+		files:  performance.ShippedAssetPaths("web/static", performance.ShippedCSS),
 	},
 }
 

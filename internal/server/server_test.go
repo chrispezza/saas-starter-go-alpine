@@ -348,6 +348,16 @@ func TestServer_HomeExplainer(t *testing.T) {
 			t.Errorf("budget grid missing %q (rendered from internal/performance)", want)
 		}
 	}
+	// ADR-034: every budget row also shows what this instance observed and
+	// which ADR-000 class it belongs to — the page proves, it does not assert.
+	if got := strings.Count(body, `data-testid="perf-observed"`); got != 10 {
+		t.Errorf("budget grid renders %d observed values, want 10", got)
+	}
+	for _, want := range []string{"Enforced", "Monitored", "Aspirational", "Server-Timing"} {
+		if !strings.Contains(body, want) {
+			t.Errorf("budget grid missing %q (ADR-000 classification / ADR-034 proof)", want)
+		}
+	}
 }
 
 // TestServer_CloseIsIdempotentAndKeepsServing pins the #117 lifecycle

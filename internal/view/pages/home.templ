@@ -43,11 +43,16 @@ type ExplainerSource struct {
 	Snippet string
 }
 
-// BudgetStat is one ADR-000 budget, rendered from internal/performance.
+// BudgetStat is one ADR-000 budget, rendered from internal/performance,
+// next to what this process observed (ADR-034). Status is pass, fail or
+// unmeasured; Class is the ADR-000 §1 tier (Enforced/Monitored/Aspirational).
 type BudgetStat struct {
-	Label string
-	Value string
-	Note  string
+	Label    string
+	Budget   string
+	Observed string
+	Status   string
+	Class    string
+	Note     string
 }
 
 // surface is one entry in the home directory of demo surfaces.
@@ -189,27 +194,65 @@ templ explainer(nodes []ExplainerNode) {
 	</section>
 }
 
-// perfStats renders the ADR-000 budgets. The values arrive from the handler,
-// which reads internal/performance at request time — this component never
-// hardcodes a number, which is the point it demonstrates.
+// statusClasses maps a budget row's status to role-token styling (ADR-029).
+func statusClasses(status string) string {
+	switch status {
+	case "pass":
+		return "bg-success/10 text-success"
+	case "fail":
+		return "bg-danger/10 text-danger"
+	default:
+		return "bg-surface-hover text-muted-foreground"
+	}
+}
+
+func statusLabel(status string) string {
+	switch status {
+	case "pass":
+		return "within budget"
+	case "fail":
+		return "over budget"
+	default:
+		return "not measured"
+	}
+}
+
+// perfStats renders the ADR-000 budgets next to what this process observed
+// (ADR-034). Budgets arrive from the handler, which reads
+// internal/performance at request time; observations come from the process
+// observer — this component never hardcodes a number, which is the point.
 templ perfStats(stats []BudgetStat) {
 	<section id="budgets" data-testid="perf-stats" aria-labelledby="budgets-heading" class="max-w-3xl mx-auto pb-12 scroll-mt-20">
 		<header class="mb-6 text-center">
 			<p class="text-sm uppercase tracking-wide text-muted-foreground mb-2">Live performance budgets</p>
-			<h2 id="budgets-heading" class="text-2xl font-bold mb-3">What CI refuses to ship past</h2>
+			<h2 id="budgets-heading" class="text-2xl font-bold mb-3">Budget vs. observed, on this instance</h2>
 			<p class="text-muted-foreground max-w-xl mx-auto">
-				Rendered on this request from the constants in
+				Budgets are the constants in
 				<code class="text-xs px-1 rounded bg-primary/10 text-link">internal/performance/budgets.go</code>
-				— the same values <code class="text-xs px-1 rounded bg-primary/10 text-link">task ci</code> enforces. Change the constant, and this grid changes; no template edit involved.
+				— the same values <code class="text-xs px-1 rounded bg-primary/10 text-link">task ci</code> enforces.
+				Observed values are read from this process on every request: latency over the recent window, memory from the runtime, startup from main, assets and binary as shipped.
+			</p>
+			<p class="mt-3 text-xs text-muted-foreground max-w-xl mx-auto">
+				<span class="font-medium text-foreground">Enforced</span> fails the build ·
+				<span class="font-medium text-foreground">Monitored</span> is measured but does not gate ·
+				<span class="font-medium text-foreground">Aspirational</span> has no measurement yet (ADR-000 §1).
+				This response carries a <code class="text-xs px-1 rounded bg-primary/10 text-link">Server-Timing</code> header too — open your devtools' timing tab.
 			</p>
 		</header>
-		<dl class="grid gap-3 grid-cols-2 sm:grid-cols-3 lg:grid-cols-5">
+		<dl class="grid gap-3 grid-cols-1 sm:grid-cols-2 lg:grid-cols-3">
 			for _, s := range stats {
-				<div data-testid="perf-stat" class="bg-surface rounded-lg shadow-sm p-4 text-center">
-					<dt class="text-xs uppercase tracking-wide text-muted-foreground">{ s.Label }</dt>
-					<dd class="mt-1">
-						<span class="block text-xl font-semibold text-foreground">{ "< " + s.Value }</span>
-						<span class="block text-xs text-muted-foreground mt-1">{ s.Note }</span>
+				<div data-testid="perf-stat" class="bg-surface rounded-lg shadow-sm p-4">
+					<dt class="flex items-center justify-between gap-2">
+						<span class="text-xs uppercase tracking-wide text-muted-foreground">{ s.Label }</span>
+						<span class="text-[10px] uppercase tracking-wide px-1.5 py-0.5 rounded border border-border text-muted-foreground">{ s.Class }</span>
+					</dt>
+					<dd class="mt-2">
+						<div class="flex items-baseline gap-3">
+							<span data-testid="perf-observed" class="text-xl font-semibold text-foreground tabular-nums">{ s.Observed }</span>
+							<span class="text-sm text-muted-foreground tabular-nums">{ "< " + s.Budget }</span>
+						</div>
+						<span class={ "inline-block mt-2 text-xs px-2 py-0.5 rounded-full " + statusClasses(s.Status) }>{ statusLabel(s.Status) }</span>
+						<span class="block text-xs text-muted-foreground mt-2">{ s.Note }</span>
 					</dd>
 				</div>
 			}
