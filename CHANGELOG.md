@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.9.0] - 2026-09-12
+
 ### Added
 - Three quiz questions on the ADR-034 proof surfaces (observed-vs-budget
   grid, the isolation check, Retry-After on 429) via migration 000008,
@@ -461,7 +463,8 @@ enforcement, unified logging, guest-mode backend, and a release pipeline.
   injection works correctly
 - Build commands in Taskfile now include `-ldflags` version injection
 
-[Unreleased]: https://github.com/clownware/go-performance-starter/compare/v0.8.0...HEAD
+[Unreleased]: https://github.com/clownware/go-performance-starter/compare/v0.9.0...HEAD
+[0.9.0]: https://github.com/clownware/go-performance-starter/compare/v0.8.0...v0.9.0
 [0.8.0]: https://github.com/clownware/go-performance-starter/compare/v0.7.0...v0.8.0
 [0.7.0]: https://github.com/clownware/go-performance-starter/compare/v0.6.0...v0.7.0
 [0.6.0]: https://github.com/clownware/go-performance-starter/compare/v0.5.2...v0.6.0
