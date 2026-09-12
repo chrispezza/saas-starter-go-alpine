@@ -15,6 +15,7 @@ import (
 	"github.com/joho/godotenv"
 
 	"github.com/clownware/go-performance-starter/internal/config"
+	"github.com/clownware/go-performance-starter/internal/handler"
 	"github.com/clownware/go-performance-starter/internal/jobs"
 	"github.com/clownware/go-performance-starter/internal/middleware"
 	"github.com/clownware/go-performance-starter/internal/performance"
@@ -56,6 +57,8 @@ func main() {
 	// Stamp static asset URLs with the build version so each release busts
 	// the 1-year asset cache (ADR-016); dev builds keep a process-start stamp.
 	view.SetAssetVersion(version)
+	// /health names the build by the same stamp (Docker builds carry no VCS info).
+	handler.SetBuildVersion(version)
 
 	// Create context that listens for termination signals
 	ctx, cancel := context.WithCancel(context.Background())

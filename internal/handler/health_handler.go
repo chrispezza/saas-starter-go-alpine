@@ -22,7 +22,37 @@ var (
 	startOnce  sync.Once
 	healthDB   Pinger
 	healthDBMu sync.RWMutex
+
+	// buildVersion is the -X main.version stamp main hands over at boot;
+	// "dev" until then, matching main's default.
+	buildVersion   = "dev"
+	buildVersionMu sync.RWMutex
 )
+
+// SetBuildVersion records the build's version string (main's ldflags stamp)
+// so /health can name the build even where no VCS info is compiled in —
+// Docker builds copy the tree without .git, so the revision alone reported
+// "dev" on every deployed instance.
+func SetBuildVersion(v string) {
+	buildVersionMu.Lock()
+	buildVersion = v
+	buildVersionMu.Unlock()
+}
+
+// resolveVersion picks the most specific name for the running build: the
+// stamped version when a release or deploy set one, else the short VCS
+// revision of an unstamped local build, else "dev".
+func resolveVersion(settings []debug.BuildSetting, build string) string {
+	if build != "" && build != "dev" {
+		return build
+	}
+	for _, s := range settings {
+		if s.Key == "vcs.revision" && len(s.Value) >= 7 {
+			return s.Value[:7]
+		}
+	}
+	return "dev"
+}
 
 // InitHealth records the server start time and stores the dependency the
 // detail probe pings. Pass nil when no database is configured — callers
@@ -65,15 +95,14 @@ func HealthDetailHandler(w http.ResponseWriter, r *http.Request) {
 		dbStatus = "not configured"
 	}
 
-	version := "dev"
+	var settings []debug.BuildSetting
 	if info, ok := debug.ReadBuildInfo(); ok {
-		for _, s := range info.Settings {
-			if s.Key == "vcs.revision" && len(s.Value) >= 7 {
-				version = s.Value[:7]
-				break
-			}
-		}
+		settings = info.Settings
 	}
+	buildVersionMu.RLock()
+	build := buildVersion
+	buildVersionMu.RUnlock()
+	version := resolveVersion(settings, build)
 
 	httpStatus := http.StatusOK
 	if status != "ok" {

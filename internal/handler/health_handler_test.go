@@ -6,6 +6,8 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"runtime/debug"
+	"strings"
 	"testing"
 )
 
@@ -133,5 +135,50 @@ func TestHealthDetailHandler_PingTimeout(t *testing.T) {
 
 	if !sawDeadline {
 		t.Error("ping context carried no deadline — a slow dependency could hang the probe")
+	}
+}
+
+// TestResolveVersion pins how /health names the build: the ldflags version
+// wins when a release or deploy stamped one (Docker builds carry no VCS
+// info, so the revision alone reported "dev" on every deployed instance —
+// found verifying v0.9.0); a local build without a stamp falls back to the
+// short VCS revision; nothing known stays "dev".
+func TestResolveVersion(t *testing.T) {
+	vcs := []debug.BuildSetting{{Key: "vcs.revision", Value: "abcdef1234567890"}}
+	tests := []struct {
+		name     string
+		settings []debug.BuildSetting
+		build    string
+		want     string
+	}{
+		{name: "stamped build version wins over the revision", settings: vcs, build: "v0.9.0-3-gbda0524", want: "v0.9.0-3-gbda0524"},
+		{name: "unstamped local build uses the short revision", settings: vcs, build: "dev", want: "abcdef1"},
+		{name: "empty build version behaves like dev", settings: vcs, build: "", want: "abcdef1"},
+		{name: "no stamp and no revision is dev", settings: nil, build: "dev", want: "dev"},
+		{name: "revision too short to shorten is ignored", settings: []debug.BuildSetting{{Key: "vcs.revision", Value: "abc"}}, build: "", want: "dev"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := resolveVersion(tt.settings, tt.build); got != tt.want {
+				t.Errorf("resolveVersion() = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
+
+// TestHealthDetailHandler_ReportsBuildVersion proves the wiring: the version
+// main stamps at boot is what the probe reports.
+func TestHealthDetailHandler_ReportsBuildVersion(t *testing.T) {
+	SetBuildVersion("v9.9.9-test")
+	t.Cleanup(func() { SetBuildVersion("dev") })
+	InitHealth(nil)
+
+	rec := httptest.NewRecorder()
+	HealthDetailHandler(rec, httptest.NewRequest(http.MethodGet, "/health", nil))
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200", rec.Code)
+	}
+	if !strings.Contains(rec.Body.String(), `"version":"v9.9.9-test"`) {
+		t.Errorf("body = %s, want the stamped build version", rec.Body.String())
 	}
 }
