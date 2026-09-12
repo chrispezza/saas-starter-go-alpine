@@ -49,6 +49,8 @@ jobs:
       DATABASE_URL: ${{ secrets.SUPABASE_DATABASE_URL }}
     steps:
       - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0 # full history + tags so git describe can name the build
 
       - name: Set up flyctl
         uses: superfly/flyctl-actions/setup-flyctl@dfdfedc86b296f5e5384f755a18bf400409a15d0 # v1.4
@@ -67,4 +69,9 @@ jobs:
       # and build config come from fly.toml, so nothing here is
       # deployment-specific.
       - name: Deploy
-        run: flyctl deploy --remote-only
+        # Stamp the image with the version the release path uses (Dockerfile
+        # ARG VERSION -> -X main.version). Without it every continuous deploy
+        # reports "dev" in /health and re-stamps asset URLs from process start,
+        # and the deploy that follows a tagged release silently replaces the
+        # tagged image with a "dev" one.
+        run: flyctl deploy --remote-only --build-arg "VERSION=$(git describe --tags --always)"
