@@ -30,8 +30,11 @@ document.addEventListener('htmx:beforeSwap', (event) => {
   // return meaningful fragments on validation and auth failures (400/401/
   // 409/422): inline form errors, re-rendered question cards. Swap those so
   // the user sees the feedback; other statuses keep the default behavior.
+  // A 429 is swapped only when the limiter's refusal is HTML (the /patterns
+  // demo, ADR-034) — the plain-text default stays out of the page.
   const status = event.detail.xhr.status;
-  if ([400, 401, 409, 422].includes(status)) {
+  const contentType = event.detail.xhr.getResponseHeader('Content-Type') || '';
+  if ([400, 401, 409, 422].includes(status) || (status === 429 && contentType.includes('text/html'))) {
     event.detail.shouldSwap = true;
     event.detail.isError = false;
   }

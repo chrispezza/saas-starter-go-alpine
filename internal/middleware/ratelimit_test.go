@@ -183,3 +183,85 @@ func TestLimiterStore_GetRefreshesLastSeen(t *testing.T) {
 		t.Errorf("get() left lastSeen %v old, want refreshed", age)
 	}
 }
+
+// TestRateLimiter_RetryAfter pins ADR-034 TC-5: every 429 tells the client
+// when to come back. With one token per second and a burst of one, the
+// second immediate request must wait ~1s — reported as a whole second,
+// never zero.
+func TestRateLimiter_RetryAfter(t *testing.T) {
+	tests := []struct {
+		name           string
+		rps            float64
+		burst          int
+		wantRetryAfter string
+	}{
+		{name: "one token per second", rps: 1, burst: 1, wantRetryAfter: "1"},
+		{name: "one token per two seconds", rps: 0.5, burst: 1, wantRetryAfter: "2"},
+		{name: "glacial refill still reports whole seconds", rps: 0.001, burst: 1, wantRetryAfter: "1000"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			h := RateLimiter(t.Context(), tt.rps, tt.burst)(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				w.WriteHeader(http.StatusOK)
+			}))
+			for i := 0; i < tt.burst; i++ {
+				rec := httptest.NewRecorder()
+				req := httptest.NewRequest(http.MethodGet, "/", nil)
+				req.RemoteAddr = "10.0.0.9:1"
+				h.ServeHTTP(rec, req)
+				if rec.Code != http.StatusOK {
+					t.Fatalf("warm-up request %d: status = %d, want 200", i+1, rec.Code)
+				}
+				if rec.Header().Get("Retry-After") != "" {
+					t.Errorf("allowed request must not carry Retry-After, got %q", rec.Header().Get("Retry-After"))
+				}
+			}
+			rec := httptest.NewRecorder()
+			req := httptest.NewRequest(http.MethodGet, "/", nil)
+			req.RemoteAddr = "10.0.0.9:1"
+			h.ServeHTTP(rec, req)
+			if rec.Code != http.StatusTooManyRequests {
+				t.Fatalf("limited request: status = %d, want 429", rec.Code)
+			}
+			if got := rec.Header().Get("Retry-After"); got != tt.wantRetryAfter {
+				t.Errorf("Retry-After = %q, want %q", got, tt.wantRetryAfter)
+			}
+		})
+	}
+}
+
+// TestRateLimiterWith_Refusal pins the seam the /patterns demo uses: the
+// caller supplies the refusal response, the limiter supplies the verdict
+// and Retry-After before handing over — so the demo's HTML 429 is the
+// production limiter refusing, not a handler pretending.
+func TestRateLimiterWith_Refusal(t *testing.T) {
+	refused := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/html; charset=utf-8")
+		w.WriteHeader(http.StatusTooManyRequests)
+		_, _ = w.Write([]byte("<li>refused, retry after " + w.Header().Get("Retry-After") + "s</li>"))
+	})
+	h := RateLimiterWith(t.Context(), 0.5, 1, refused)(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte("<li>allowed</li>"))
+	}))
+
+	send := func() *httptest.ResponseRecorder {
+		rec := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodGet, "/", nil)
+		req.RemoteAddr = "10.0.0.7:1"
+		h.ServeHTTP(rec, req)
+		return rec
+	}
+	if rec := send(); rec.Code != http.StatusOK || rec.Body.String() != "<li>allowed</li>" {
+		t.Fatalf("first request: status %d body %q, want 200 allowed", rec.Code, rec.Body.String())
+	}
+	rec := send()
+	if rec.Code != http.StatusTooManyRequests {
+		t.Fatalf("second request: status = %d, want 429", rec.Code)
+	}
+	if got := rec.Body.String(); got != "<li>refused, retry after 2s</li>" {
+		t.Errorf("refusal body = %q, want the custom fragment with Retry-After visible to it", got)
+	}
+	if ct := rec.Header().Get("Content-Type"); ct != "text/html; charset=utf-8" {
+		t.Errorf("Content-Type = %q, want the custom handler's", ct)
+	}
+}

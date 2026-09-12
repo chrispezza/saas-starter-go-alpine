@@ -2,7 +2,9 @@ package middleware
 
 import (
 	"context"
+	"math"
 	"net/http"
+	"strconv"
 	"sync"
 	"time"
 
@@ -93,20 +95,64 @@ func (s *limiterStore) run(ctx context.Context, interval time.Duration) {
 //	auth routes:   RateLimiter(ctx, 5, 5)    // 5 req/sec, burst 5
 //	API routes:    RateLimiter(ctx, 100, 20) // 100 req/sec, burst 20
 //	public routes: RateLimiter(ctx, 50, 10)  // 50 req/sec, burst 10
+//
+// A limited request is answered 429 with a Retry-After header (whole
+// seconds, at least 1) and a plain-text body.
 func RateLimiter(ctx context.Context, rps float64, burst int) func(http.Handler) http.Handler {
+	return RateLimiterWith(ctx, rps, burst, nil)
+}
+
+// RateLimiterWith is RateLimiter with a caller-supplied refusal response.
+// The limiter decides and sets Retry-After, then hands the request to
+// refused (nil means the plain-text default) — so a surface that wants an
+// HTML 429 (the /patterns demo, ADR-034) still gets the production verdict.
+func RateLimiterWith(ctx context.Context, rps float64, burst int, refused http.Handler) func(http.Handler) http.Handler {
 	store := newLimiterStore(rps, burst)
 	go store.run(ctx, evictInterval)
+	if refused == nil {
+		refused = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			http.Error(w, "Too Many Requests", http.StatusTooManyRequests)
+		})
+	}
 
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			ip := r.RemoteAddr // RealIP middleware normalizes this upstream
 
-			if !store.get(ip).Allow() {
-				http.Error(w, "Too Many Requests", http.StatusTooManyRequests)
+			if wait, ok := take(store.get(ip)); !ok {
+				w.Header().Set("Retry-After", retryAfterSeconds(wait))
+				refused.ServeHTTP(w, r)
 				return
 			}
 
 			next.ServeHTTP(w, r)
 		})
 	}
+}
+
+// take consumes one token if one is available now. Otherwise it reports how
+// long the bucket needs before one would be, leaving the bucket untouched
+// (the reservation is cancelled) so a refused request costs nothing.
+func take(lim *rate.Limiter) (wait time.Duration, ok bool) {
+	now := time.Now()
+	res := lim.ReserveN(now, 1)
+	if !res.OK() {
+		return time.Second, false // burst of zero: never allowed
+	}
+	if delay := res.DelayFrom(now); delay > 0 {
+		res.CancelAt(now)
+		return delay, false
+	}
+	return 0, true
+}
+
+// retryAfterSeconds renders a wait as the whole-second Retry-After value
+// RFC 9110 specifies, rounding up so a client never retries early, and
+// never saying 0.
+func retryAfterSeconds(wait time.Duration) string {
+	secs := int64(math.Ceil(wait.Seconds()))
+	if secs < 1 {
+		secs = 1
+	}
+	return strconv.FormatInt(secs, 10)
 }
